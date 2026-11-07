@@ -144,8 +144,8 @@ Invoke-NativeTool -Exe $aapt2 `
         $resZip,
         "--min-sdk-version", "26",
         "--target-sdk-version", "34",
-        "--version-code", "1",
-        "--version-name", "1.0.0",
+        "--version-code", "2",
+        "--version-name", "1.1.0",
         "--auto-add-overlay"
     ) `
     -LogPath (Join-Path $logDir "aapt2-link.log") -Label "aapt2 link" | Out-Null
@@ -359,6 +359,19 @@ if ($manifestText -notmatch "POJAV_RENDERER=opengles") {
     throw "pojavEnv does not set POJAV_RENDERER=opengles* -- FCL will crash with SIGSEGV in strncmp during glfwInit"
 }
 Write-Host "  POJAV_RENDERER is injected (required; missing causes SIGSEGV)"
+
+# v2 metadata: new FCL prefers fclPlugin_V2; v1 fields above are kept so old
+# FCL versions still discover the plugin. The JSON itself is validated by
+# native/tools/check_plugin_v2.py (run in CI and run_all_gates.py).
+$hasV2 = $manifestText -match [regex]::Escape('"fclPlugin_V2"')
+if ($hasV2) {
+    if ($manifestText -notmatch [regex]::Escape('"gles_driver_angle"')) {
+        throw "v2 plugin is missing gles_driver_angle title metadata"
+    }
+    Write-Host "  v2 metadata present: fclPlugin_V2, gles_driver_angle"
+} else {
+    Write-Host "  v2 metadata absent (v1-only build)"
+}
 
 # The native libraries must be present under lib/<abi>/ or dlopen fails.
 foreach ($abi in $abis) {

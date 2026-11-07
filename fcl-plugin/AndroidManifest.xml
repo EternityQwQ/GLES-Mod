@@ -90,6 +90,28 @@
             android:value="GLES Mod (native OpenGL ES)" />
 
         <!--
+          ==================== FCL 插件声明 v2 ====================
+
+          新版 FCL 优先解析 fclPlugin_V2；旧版 FCL 不认识它，会回退到上面的
+          v1 字段。因此 v1/v2 并存：旧 FCL 仍能识别插件，新 FCL 获得
+          「使用 ANGLE 作为 GLES 驱动」的开关。
+
+          fclPlugin_V2 的值是插件 APK 内字符串资源 renderer_config 的 ID；
+          该资源内容是 RendererConfigV2 JSON（见 res/values/strings.xml）。
+        -->
+        <meta-data
+            android:name="fclPlugin_V2"
+            android:resource="@string/renderer_config" />
+
+        <!--
+          v2 开关标题的本地化资源。FCL 的 parseV2() 按 JSON 里 title.key
+          到 meta-data 中查找同名项，再用 getInt() 取资源 ID。
+        -->
+        <meta-data
+            android:name="gles_driver_angle"
+            android:resource="@string/gles_driver_angle" />
+
+        <!--
           boatEnv：【必需字段】但本项目不用。
 
           FCL 的 parseV1() 用 `metaData.getString("boatEnv") ?: return` 读取它，

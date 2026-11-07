@@ -140,6 +140,13 @@ def main():
                    os.path.join(HERE, "check_proxy_emulation.py")])
     gates.append(("proxy emu", rc, line_of(out, ["verdict"])))
 
+    # 13. FCL RendererPlugin v2 config. parseV2() is silent on failure: a
+    #     malformed JSON or missing title resource makes the plugin disappear
+    #     from the renderer list without an error. Check it before packaging.
+    rc, out = run([PY, "-X", "utf8",
+                   os.path.join(HERE, "check_plugin_v2.py")])
+    gates.append(("plugin v2", rc, line_of(out, ["verdict"])))
+
     print("=" * 74)
     for name, rc, v in gates:
         print("%-16s rc=%-3s %s" % (name, rc, v[:150]))

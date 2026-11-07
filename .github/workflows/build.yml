@@ -102,10 +102,11 @@ jobs:
         shell: pwsh
         run: .\native\build-native.ps1 -Abi armeabi-v7a
 
-      - name: Verify native symbols and proxy wiring
+      - name: Verify native symbols and plugin wiring
         shell: pwsh
         run: |
           python native\tools\check_proxy_emulation.py
+          python native\tools\check_plugin_v2.py
           python native\tools\verify_doc_claims.py
           python native\tools\check_symbols.py --lib build\native\arm64-v8a\libgl_gles.so --def native\symbols.def
           python native\tools\check_symbols.py --lib build\native\armeabi-v7a\libgl_gles.so --def native\symbols.def

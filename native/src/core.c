@@ -644,14 +644,36 @@ static void *get_gles_handle(void) {
     if (g_gles_handle_tried) return g_gles_handle;
     g_gles_handle_tried = 1;
 
+    /*
+     * 兜底句柄必须与当前 EGL 同源：
+     *   - 插件显式设置 LIBGL_GLES 时优先用它（ANGLE 模式通常是
+     *     libGLESv2_angle.so）；
+     *   - 否则若 POJAVEXEC_EGL 指向 ANGLE（libEGL_angle.so），
+     *     用 libGLESv2_angle.so；
+     *   - 最后才是系统 libGLESv2.so。
+     *
+     * 如果这里在 ANGLE 模式下仍打开系统 libGLESv2.so，主路径虽然
+     * 走 eglGetProcAddress，但一旦某个符号没覆盖，兜底会拿到厂商
+     * 驱动实例，与 ANGLE 上下文不是同一份实现。
+     */
+    const char *chosen = "libGLESv2.so";
+    const char *libgl_gles = glesmod_env_str(GLESMOD_ENV_LIBGL_GLES);
+    const char *egl_name = glesmod_env_str(GLESMOD_ENV_EXEC_EGL);
+
+    if (libgl_gles != NULL && libgl_gles[0] != '\0') {
+        chosen = libgl_gles;
+    } else if (egl_name != NULL && strstr(egl_name, "angle") != NULL) {
+        chosen = "libGLESv2_angle.so";
+    }
+
     /* RTLD_LOCAL：只需句柄做 dlsym，无需暴露自己的符号。
      * RTLD_NOW：立即解析，便于尽早暴露链接问题。 */
-    g_gles_handle = dlopen("libGLESv2.so", RTLD_NOW | RTLD_LOCAL);
+    g_gles_handle = dlopen(chosen, RTLD_NOW | RTLD_LOCAL);
     if (g_gles_handle == NULL) {
-        log_line(0, "无法 dlopen libGLESv2.so: %s", dlerror());
+        log_line(0, "无法 dlopen %s: %s", chosen, dlerror());
         return NULL;
     }
-    log_line(1, "已打开 libGLESv2.so (%p)", g_gles_handle);
+    log_line(1, "已打开 %s (%p)", chosen, g_gles_handle);
     return g_gles_handle;
 }
 
