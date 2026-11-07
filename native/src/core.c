@@ -961,11 +961,22 @@ static int probe_capabilities(void) {
      */
     if (get_string != NULL) {
         const char *ext = (const char *)get_string(GLESMOD_GL_EXTENSIONS);
-        if (glesmod_extension_present(ext, "GL_EXT_multi_draw_indirect") &&
-            (glesym_resolve("glMultiDrawArraysIndirectEXT") != NULL ||
-             glesym_resolve("glMultiDrawElementsIndirectEXT") != NULL)) {
+        int has_ext =
+            glesmod_extension_present(ext, "GL_EXT_multi_draw_indirect");
+        int has_arrays =
+            has_ext && glesym_resolve("glMultiDrawArraysIndirectEXT") != NULL;
+        int has_elements =
+            has_ext && glesym_resolve("glMultiDrawElementsIndirectEXT") != NULL;
+
+        log_line(1, "Multi-Draw: GL_EXT_multi_draw_indirect=%d, "
+                    "arrays=%d, elements=%d",
+                 has_ext, has_arrays, has_elements);
+
+        if (has_arrays || has_elements) {
             g_caps.flags |= GLESMOD_CAP_MULTI_DRAW;
         }
+    } else {
+        log_line(1, "Multi-Draw: 无法读取扩展串，使用逐条 indirect 回退");
     }
 
     /* 持久映射：ES 3.0+ 有 glMapBufferRange，但持久映射位需扩展 */
