@@ -137,6 +137,8 @@ replay_pid*.log
 !开发任务书.txt
 !native/tools/*.txt
 !native/tools/**/*.txt
+# CMake project file, not a disposable .txt report
+!native/CMakeLists.txt
 
 # ---- 临时着色器与中间文件 -----------------------------------------------
 # 根目录下形如 `vertex` 的临时着色器文件（转换器误留）
