@@ -65,16 +65,21 @@ def check_custom_definitions() -> None:
     if "glesmod_log_proxy_unsupported" not in text:
         errors.append("custom.c: glesmod_log_proxy_unsupported() is missing")
 
-    if "glesmod_should_emulate_proxy(target)" not in text:
-        errors.append("custom.c: glesmod_should_emulate_proxy(target) is not used")
+    if "glesmod_proxy_action(target)" not in text:
+        errors.append("custom.c: glesmod_proxy_action(target) is not used")
     else:
-        n = text.count("glesmod_should_emulate_proxy(target)")
-        notes.append(f"custom.c: proxy emulation guard used {n}x")
-        if n < 3:
+        n = text.count("glesmod_proxy_action(target)")
+        notes.append(f"custom.c: proxy policy helper used {n}x")
+        if n < 4:
             errors.append(
-                "custom.c: expected emulated-proxy guard in glTexImage2D, "
-                "glGetTexLevelParameteriv and glGetTexLevelParameterfv"
+                "custom.c: expected glesmod_proxy_action() in glTexImage2D, "
+                "glTexImage3D, glGetTexLevelParameteriv and "
+                "glGetTexLevelParameterfv"
             )
+
+    for action in ("GLESMOD_PROXY_EMULATE", "GLESMOD_PROXY_REJECT"):
+        if action not in text:
+            errors.append(f"custom.c: {action} is missing")
 
     if "glesmod_proxy_emu_enabled()" not in text:
         errors.append("custom.c: glesmod_proxy_emu_enabled() is not used")

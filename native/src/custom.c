@@ -918,9 +918,26 @@ static int glesmod_proxy_emu_enabled(void)
     return cached;
 }
 
-static int glesmod_should_emulate_proxy(GLenum target)
+/*
+ * 一个 proxy target 在本次调用里应该怎么处理。
+ *
+ * 所有入口（glTexImage2D/3D、glGetTexLevelParameteriv/fv）都只判断
+ * 这一个结果，避免把「是否 proxy / 是否启用仿真 / 是否已实现」三件事
+ * 复制到四个地方；后者会导致新增 target 时漏改某个入口。
+ */
+typedef enum {
+    GLESMOD_PROXY_PASS = 0,   /* 不是 proxy，或仿真关闭：原样转发给驱动 */
+    GLESMOD_PROXY_EMULATE,    /* 已实现：读写本地 proxy 状态 */
+    GLESMOD_PROXY_REJECT      /* 未实现：不进入驱动，按不可分配处理 */
+} glesmod_proxy_action_t;
+
+static glesmod_proxy_action_t glesmod_proxy_action(GLenum target)
 {
-    return glesmod_is_emulated_proxy_target(target) && glesmod_proxy_emu_enabled();
+    if (!glesmod_is_proxy_target(target)) return GLESMOD_PROXY_PASS;
+    if (!glesmod_proxy_emu_enabled()) return GLESMOD_PROXY_PASS;
+    return glesmod_is_emulated_proxy_target(target)
+               ? GLESMOD_PROXY_EMULATE
+               : GLESMOD_PROXY_REJECT;
 }
 
 static void glesmod_log_proxy_unsupported(GLenum target)
@@ -1096,13 +1113,16 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
 
     glesmod_lazy_init();
 
-    if (glesmod_should_emulate_proxy(target)) {
-        glesmod_proxy_record(target, level, internalformat, width, height);
-        return;
-    }
-    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
-        glesmod_log_proxy_unsupported(target);
-        return;
+    switch (glesmod_proxy_action(target)) {
+        case GLESMOD_PROXY_EMULATE:
+            glesmod_proxy_record(target, level, internalformat, width, height);
+            return;
+        case GLESMOD_PROXY_REJECT:
+            glesmod_log_proxy_unsupported(target);
+            return;
+        case GLESMOD_PROXY_PASS:
+        default:
+            break;
     }
 
     GLenum f = format, t = type;
@@ -1138,8 +1158,12 @@ void glTexImage3D(GLenum target, GLint level, GLint internalformat,
 
     glesmod_lazy_init();
 
-    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
-        /* 3D / array proxy 暂未实现：不进 ANGLE，按不可分配处理。 */
+    /*
+     * glesmod_proxy_record() 目前只定义 2D 语义（width/height）。
+     * 3D / array proxy 即使将来被标记为已实现，也必须先扩展记录结构，
+     * 因此这里对一切非 PASS 的 proxy target 都安全拒绝。
+     */
+    if (glesmod_proxy_action(target) != GLESMOD_PROXY_PASS) {
         glesmod_log_proxy_unsupported(target);
         return;
     }
@@ -1166,48 +1190,56 @@ void glTexImage3D(GLenum target, GLint level, GLint internalformat,
 
 void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *params)
 {
-    if (glesmod_should_emulate_proxy(target)) {
-        if (params != NULL) {
-            *params = glesmod_proxy_query(pname, level);
-        }
-        return;
-    }
-    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
-        if (params != NULL) {
-            *params = 0;
-        }
-        glesmod_log_proxy_unsupported(target);
-        return;
-    }
-
     typedef void (*fn_t)(GLenum, GLint, GLenum, GLint *);
     static fn_t real = NULL;
 
     glesmod_lazy_init();
+
+    switch (glesmod_proxy_action(target)) {
+        case GLESMOD_PROXY_EMULATE:
+            if (params != NULL) {
+                *params = glesmod_proxy_query(pname, level);
+            }
+            return;
+        case GLESMOD_PROXY_REJECT:
+            if (params != NULL) {
+                *params = 0;
+            }
+            glesmod_log_proxy_unsupported(target);
+            return;
+        case GLESMOD_PROXY_PASS:
+        default:
+            break;
+    }
+
     RESOLVE_OR_RETURN(real, "glGetTexLevelParameteriv", );
     real(target, level, pname, params);
 }
 
 void glGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, GLfloat *params)
 {
-    if (glesmod_should_emulate_proxy(target)) {
-        if (params != NULL) {
-            *params = (GLfloat)glesmod_proxy_query(pname, level);
-        }
-        return;
-    }
-    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
-        if (params != NULL) {
-            *params = 0.0f;
-        }
-        glesmod_log_proxy_unsupported(target);
-        return;
-    }
-
     typedef void (*fn_t)(GLenum, GLint, GLenum, GLfloat *);
     static fn_t real = NULL;
 
     glesmod_lazy_init();
+
+    switch (glesmod_proxy_action(target)) {
+        case GLESMOD_PROXY_EMULATE:
+            if (params != NULL) {
+                *params = (GLfloat)glesmod_proxy_query(pname, level);
+            }
+            return;
+        case GLESMOD_PROXY_REJECT:
+            if (params != NULL) {
+                *params = 0.0f;
+            }
+            glesmod_log_proxy_unsupported(target);
+            return;
+        case GLESMOD_PROXY_PASS:
+        default:
+            break;
+    }
+
     RESOLVE_OR_RETURN(real, "glGetTexLevelParameterfv", );
     real(target, level, pname, params);
 }

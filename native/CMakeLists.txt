@@ -33,12 +33,10 @@ target_compile_options(gl_gles PRIVATE
 # liblog: __android_log_print in core.c
 # libdl:  dlopen/dlsym/dladdr
 # libm:   math helpers used by the shader converter
-# libandroid: ANativeWindow/EGL helpers if a future change uses them
 target_link_libraries(gl_gles PRIVATE
     log
     dl
     m
-    android
 )
 
 set_target_properties(gl_gles PROPERTIES
