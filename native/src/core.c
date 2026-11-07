@@ -817,6 +817,26 @@ glesmod_proc_t glesym_resolve(const char *name) {
 /* 能力探测                                                            */
 /* ------------------------------------------------------------------ */
 
+/*
+ * 判断空格分隔的扩展串是否包含完整 token。
+ *
+ * 必须按 token 边界匹配：裸 strstr 可能把更长的扩展名误判成目标
+ * （例如目标名是另一个扩展名的前缀）。
+ */
+int glesmod_extension_present(const char *extensions, const char *name) {
+    if (extensions == NULL || name == NULL || name[0] == '\0') return 0;
+
+    size_t n = strlen(name);
+    const char *p = extensions;
+    while ((p = strstr(p, name)) != NULL) {
+        int left_ok = (p == extensions) || (p[-1] == ' ');
+        int right_ok = (p[n] == ' ' || p[n] == '\0');
+        if (left_ok && right_ok) return 1;
+        p += n;
+    }
+    return 0;
+}
+
 /* 用给定函数名探测能力，存在则设置能力位 */
 static void probe_proc(const char *name, unsigned int bit) {
     glesmod_proc_t fn = glesym_resolve(name);
@@ -932,9 +952,20 @@ static int probe_capabilities(void) {
         probe_proc("glTexStorage2D", GLESMOD_CAP_TEXTURE_STORAGE);
     }
 
-    /* Multi-Draw：ES 没有核心支持，只有少数驱动提供扩展 */
-    if (glesym_resolve("glMultiDrawElements") != NULL) {
-        g_caps.flags |= GLESMOD_CAP_MULTI_DRAW;
+    /*
+     * Multi-Draw：只对 GL_EXT_multi_draw_indirect 做原生加速。
+     *
+     * 不能只看符号：Android 的 EGL 包装层可能返回一个“存在但不可用”的
+     * 入口点。这里要求驱动扩展串明确声明，并且对应函数可解析；真正的
+     * 探测与回退由 custom.c 在首次调用时完成。
+     */
+    if (get_string != NULL) {
+        const char *ext = (const char *)get_string(GLESMOD_GL_EXTENSIONS);
+        if (glesmod_extension_present(ext, "GL_EXT_multi_draw_indirect") &&
+            (glesym_resolve("glMultiDrawArraysIndirectEXT") != NULL ||
+             glesym_resolve("glMultiDrawElementsIndirectEXT") != NULL)) {
+            g_caps.flags |= GLESMOD_CAP_MULTI_DRAW;
+        }
     }
 
     /* 持久映射：ES 3.0+ 有 glMapBufferRange，但持久映射位需扩展 */

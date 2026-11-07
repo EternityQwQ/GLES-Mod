@@ -7,8 +7,8 @@
  *
  * 本文件包含三类实现：
  *   - 337 个转发函数（GLES 有同名函数）
- *   - 484 个安全 stub（GLES 不提供，返回零值并记降级）
- *   - 28 个定制实现在 custom.c（本文件不包含）
+ *   - 482 个安全 stub（GLES 不提供，返回零值并记降级）
+ *   - 30 个定制实现在 custom.c（本文件不包含）
  *
  * 为什么需要 stub：LWJGL 在 GL.createCapabilities() 时需要一批函数，
  * 缺失会让它抛 NullPointerException 直接崩溃。导出为 stub 可让它拿到
@@ -7352,18 +7352,6 @@ GLESMOD_EXPORT void glMatrixMode(GLenum p0)
     glesmod_report_stub("glMatrixMode");
 }
 
-/* glMultiDrawArraysIndirect —— GLES 不提供，安全 stub */
-GLESMOD_EXPORT void glMultiDrawArraysIndirect(GLenum p0, const void * p1, GLsizei p2, GLsizei p3)
-{
-    glesmod_lazy_init();
-    GLESMOD_TRACE("glMultiDrawArraysIndirect");
-    (void)p0;
-    (void)p1;
-    (void)p2;
-    (void)p3;
-    glesmod_report_stub("glMultiDrawArraysIndirect");
-}
-
 /* glMultiDrawArraysIndirectCount —— GLES 不提供，安全 stub */
 GLESMOD_EXPORT void glMultiDrawArraysIndirectCount(GLenum p0, const void * p1, GLintptr p2, GLsizei p3, GLsizei p4)
 {
@@ -7375,19 +7363,6 @@ GLESMOD_EXPORT void glMultiDrawArraysIndirectCount(GLenum p0, const void * p1, G
     (void)p3;
     (void)p4;
     glesmod_report_stub("glMultiDrawArraysIndirectCount");
-}
-
-/* glMultiDrawElementsIndirect —— GLES 不提供，安全 stub */
-GLESMOD_EXPORT void glMultiDrawElementsIndirect(GLenum p0, GLenum p1, const void * p2, GLsizei p3, GLsizei p4)
-{
-    glesmod_lazy_init();
-    GLESMOD_TRACE("glMultiDrawElementsIndirect");
-    (void)p0;
-    (void)p1;
-    (void)p2;
-    (void)p3;
-    (void)p4;
-    glesmod_report_stub("glMultiDrawElementsIndirect");
 }
 
 /* glMultiDrawElementsIndirectCount —— GLES 不提供，安全 stub */

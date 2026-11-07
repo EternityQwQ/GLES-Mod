@@ -19,6 +19,7 @@ NEEDLES = [
     (b"isamplerBuffer", "采样器类型表 isamplerBuffer (本次修复新增)"),
     (b"removed desktop-only #extension", "normalize_preprocessor_directives (#extension)"),
     (b"GLESMOD_ERROR_DIRECTIVE_NORMALIZED", "normalize_preprocessor_directives (#error)"),
+    (b"GLESMOD_MULTIDRAW_NATIVE", "GL_EXT_multi_draw_indirect native path"),
     (b"precision highp ", "采样器精度注入代码"),
     (b"depth_readback", "旧深度回读实验 (v10 应已移除)"),
 ]

@@ -41,14 +41,14 @@ OpenGL ES 与桌面 OpenGL 的能力边界不同。ES **没有**：
 
 | 类型 | 数量 | 位置 | 行为 |
 |---|---|---|---|
-| `F` 直接转发 | 345 | `native/src/generated_forwarders.c` | 查 `glesym_resolve()` → 调用同名 GLES 函数 |
-| `C` 定制实现 | 20 | `native/src/custom.c` | 特殊处理（见 §3） |
-| `S` 安全 stub | 484 | `native/src/generated_forwarders.c` | 返回零值 + `glesmod_report_stub()` |
+| `F` 直接转发 | 337 | `native/src/generated_forwarders.c` | 查 `glesym_resolve()` → 调用同名 GLES 函数 |
+| `C` 定制实现 | 30 | `native/src/custom.c` | 特殊处理（见 §3） |
+| `S` 安全 stub | 482 | `native/src/generated_forwarders.c` | 返回零值 + `glesmod_report_stub()` |
 
-> ⚠️ **生成时必须带 `--required native/tools/lwjgl_required.txt`**。漏掉该参数会让总数从 849 掉到 657（stub 484→293），导致真机 NPE。
+> ⚠️ **生成时必须带 `--required native/tools/lwjgl_required.txt`**。漏掉该参数会让总数从 849 掉到 657（stub 482→293），导致真机 NPE。
 > 每次重新生成后**必须核对总数 = 849**。
 >
-> 另需注意：850 个符号里，**每个符号的类型（F/C/S）会随路由策略调整而变化**。
+> 另需注意：849 个符号里，**每个符号的类型（F/C/S）会随路由策略调整而变化**。
 > 例如 `glBufferStorage` 最初是 `S`，在发现 Embeddium 会因此崩溃后改为 `C`（见 §3.9）。
 > 因此**总数不变不代表内容不变** —— 变更后应查 `symbols.def` 里目标符号的字母前缀，
 > 并用 `native/tools/verify_exported_symbols.py` 校验产物。
@@ -114,9 +114,15 @@ if (es_major >= 3 && glesym_resolve("glMapBufferRange") != NULL) {
 
 ### 3.1 Multi-Draw（`GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED` = 0x0001）
 
-**问题**：ES 3.2 核心不含 `glMultiDraw*`，仅少数驱动提供 `GL_EXT_multi_draw_arrays`。
+**问题**：ES 3.2 核心不含 `glMultiDraw*`；本实现只对 `GL_EXT_multi_draw_indirect` 做原生加速。
 
-**策略**：拆解为循环调用，语义等价。
+> 2026-11-07 更新：只对 `GL_EXT_multi_draw_indirect` 做原生加速，检测
+> `glMultiDrawArraysIndirectEXT` / `glMultiDrawElementsIndirectEXT`。
+> 非 indirect 的 `glMultiDrawArrays` / `glMultiDrawElements` / BaseVertex
+> 没有原生路径，始终走循环回退；原生扩展不可用或首次调用探测失败时，
+> indirect 也走逐条回退。
+
+**策略**：原生扩展优先，否则拆解为循环调用，语义等价。下面是回退路径的核心片段。
 
 ```c
 /* glMultiDrawElements(mode, count, type, indices, drawcount)
@@ -137,7 +143,7 @@ void glMultiDrawElements(GLenum mode, const GLsizei *count, GLenum type,
     }
 
     glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
-                    "Multi-Draw 不可用，已降级为循环 glDrawElements");
+                    "Multi-Draw 原生不可用，已降级为循环 glDrawElements");
 }
 ```
 
@@ -560,8 +566,8 @@ Sodium 的整数/浮点混用场景，含反向断言（纯整数运算不得被
 
 ## 8. 结论
 
-1. **降级路由已完整实现**：Multi-Draw / 持久映射 / 计算着色器 / 间接绘制 + 18 个定制实现。
-2. **真机验证通过**：Adreno 750 上 `multiDraw=false` 被正确探测，Sodium 顺利协商并渲染正常。
+1. **降级路由已完整实现**：Multi-Draw（原生扩展优先，含 indirect）/ 持久映射 / 计算着色器 + 30 个定制实现。
+2. **真机验证通过**：Adreno 750 上无扩展时 `multiDraw=false` 被正确探测，Sodium 顺利协商并渲染正常；有 `GL_EXT_multi_draw_indirect` 的设备会优先走原生 indirect 入口，非 indirect 的 `glMultiDraw*` 仍走循环。
 3. **零静默失效**：`stub_symbols` 与 `missing_symbols` 均为空，说明渲染路径没有踩到任何未实现功能。
 4. **性能高于验收标准**：ZL2 下 300~400 FPS。
 5. **诚实标注**：`state_cache` 为空开关；`degrade_events` 为空是「预测 vs 实测」的正常表现，非矛盾。

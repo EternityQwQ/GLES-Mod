@@ -65,6 +65,8 @@ CUSTOM_SYMBOLS = {
     "glMultiDrawElements",
     "glMultiDrawArrays",
     "glMultiDrawElementsBaseVertex",
+    "glMultiDrawArraysIndirect",
+    "glMultiDrawElementsIndirect",
     "glShaderSource",
     # 仅用于捕获错误信息，行为与原函数完全一致
     "glGetShaderInfoLog",

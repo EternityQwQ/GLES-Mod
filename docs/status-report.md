@@ -46,12 +46,12 @@
 
 | 部分 | 内容 |
 |---|---|
-| `native/src/` | `core.c`（符号解析/能力探测/降级/状态输出）、`custom.c`（**20 个定制实现**）、`shader.c`（GLSL→GLSL ES 转换）、`enum.c`、`probe.c`、`generated_forwarders.c`（自动生成） |
+| `native/src/` | `core.c`（符号解析/能力探测/降级/状态输出）、`custom.c`（**30 个定制实现**）、`shader.c`（GLSL→GLSL ES 转换）、`enum.c`、`probe.c`、`generated_forwarders.c`（自动生成） |
 | `native/tools/` | 符号生成/校验、着色器往返验证、真机日志分析等工具链 |
 | `src/main/java/` | `capability/`、`compat/`、`degrade/`、`backend/` 四个包 |
 | `fcl-plugin/` | FCL 渲染器插件（RendererPlugin v2 规范） |
 
-**符号总数 849** = 345 转发 + **20 定制** + 484 stub。
+**符号总数 849** = 337 转发 + **30 定制** + 482 stub。
 
 ---
 
@@ -189,7 +189,7 @@ Embeddium 实机测试（§4 开头）显示 **该路径实测未被触发** —
 | 真实夹具往返验证（`roundtrip_validate.py`） | ✅ 输出零 GLSL ES 错误 |
 | FCL 插件元数据校验 | ✅ `renderer`/`des`/`boatEnv`/`pojavEnv` 全在；`LIBGL_ES=3` 与 `POJAV_RENDERER` 已注入 |
 | **导出符号校验（本轮新增）** | ✅ 两个 ABI 均导出 869 个函数，17 个定制实现齐全 |
-| **Stub 危险度审计（`audit_stubs.py`）** | ✅ 484 个已分类：28 DANGER / 28 CAUTION / 428 SAFE |
+| **Stub 危险度审计（`audit_stubs.py`）** | ✅ 审计时 484 个已分类：28 DANGER / 28 CAUTION / 428 SAFE（现有 482） |
 
 > **往返门禁的价值**：它先证明「原码按 ES 编译**失败**」（证明是桌面专属写法），
 > 再证明「转换后**通过**」。这是一个双向断言，比单向检查强得多。
@@ -297,7 +297,7 @@ Embeddium 实机测试（§4 开头）显示 **该路径实测未被触发** —
 | ~~R-09~~ | ~~EGL 双重翻译~~ | ✅ 已排除（FCL 用系统 `libEGL.so`） |
 | R-10 | 插件未设 `LIBGL_ES` | ✅ 已闭环：插件 env 注入 `LIBGL_ES=3`，门禁校验 |
 | R-11 | 设备仅支持 ES 3.0/3.1 | 🟡 已有能力探测+降级；**未在低版本设备上验证过** |
-| **R-12** | **静默 stub 掩盖真实失败**（本轮新增） | ✅ **已审计完成**：484 个中 28 DANGER / 28 CAUTION / 428 SAFE；见 `docs/r-12-stub-audit.md` |
+| **R-12** | **静默 stub 掩盖真实失败**（本轮新增） | ✅ **已审计完成**：审计时 484 个中 28 DANGER / 28 CAUTION / 428 SAFE；现有 482；见 `docs/r-12-stub-audit.md` |
 
 > **R-12 审计结论（本轮完成）**：
 >

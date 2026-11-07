@@ -374,7 +374,7 @@ F void glVertexBindingDivisor(GLuint p0, GLuint p1)
 F void glViewport(GLint p0, GLint p1, GLsizei p2, GLsizei p3)
 F void glWaitSync(GLsync p0, GLbitfield p1, GLuint64 p2)
 
-/* ===== 定制实现（28 个，定义在 src/custom.c）===== */
+/* ===== 定制实现（30 个，定义在 src/custom.c）===== */
 
 C void glBufferStorage(GLenum p0, GLsizeiptr p1, const void * p2, GLbitfield p3)
 C GLenum glCheckFramebufferStatus(GLenum p0)
@@ -396,6 +396,8 @@ C void * glMapBufferRange(GLenum p0, GLintptr p1, GLsizeiptr p2, GLbitfield p3)
 C void glMultiDrawArrays(GLenum p0, const GLint * p1, const GLsizei * p2, GLsizei p3)
 C void glMultiDrawElements(GLenum p0, const GLsizei * p1, GLenum p2, const void *const * p3, GLsizei p4)
 C void glMultiDrawElementsBaseVertex(GLenum p0, const GLsizei * p1, GLenum p2, const void *const * p3, GLsizei p4, const GLint * p5)
+C void glMultiDrawArraysIndirect(GLenum p0, const void * p1, GLsizei p2, GLsizei p3)
+C void glMultiDrawElementsIndirect(GLenum p0, GLenum p1, const void * p2, GLsizei p3, GLsizei p4)
 C void glPolygonMode(GLenum p0, GLenum p1)
 C void glShaderSource(GLuint p0, GLsizei p1, const GLchar *const * p2, const GLint * p3)
 C void glTexImage2D(GLenum p0, GLint p1, GLint p2, GLsizei p3, GLsizei p4, GLint p5, GLenum p6, GLenum p7, const void * p8)
@@ -405,7 +407,7 @@ C void glTexParameteri(GLenum p0, GLenum p1, GLint p2)
 C void glTexStorage2D(GLenum p0, GLsizei p1, GLenum p2, GLsizei p3, GLsizei p4)
 C void glTexStorage3D(GLenum p0, GLsizei p1, GLenum p2, GLsizei p3, GLsizei p4, GLsizei p5)
 
-/* ===== 安全 stub（484 个，GLES 不提供）===== */
+/* ===== 安全 stub（482 个，GLES 不提供）===== */
 
 S void glAccum(GLenum p0, GLfloat p1)
 S void glAlphaFunc(GLenum p0, GLfloat p1)
@@ -604,9 +606,7 @@ S void * glMapNamedBufferRange(GLuint p0, GLintptr p1, GLsizeiptr p2, GLbitfield
 S void glMaterialf(GLenum p0, GLenum p1, GLfloat p2)
 S void glMateriali(GLenum p0, GLenum p1, GLint p2)
 S void glMatrixMode(GLenum p0)
-S void glMultiDrawArraysIndirect(GLenum p0, const void * p1, GLsizei p2, GLsizei p3)
 S void glMultiDrawArraysIndirectCount(GLenum p0, const void * p1, GLintptr p2, GLsizei p3, GLsizei p4)
-S void glMultiDrawElementsIndirect(GLenum p0, GLenum p1, const void * p2, GLsizei p3, GLsizei p4)
 S void glMultiDrawElementsIndirectCount(GLenum p0, GLenum p1, const void * p2, GLintptr p3, GLsizei p4, GLsizei p5)
 S void glMultiTexCoord1d(GLenum p0, GLdouble p1)
 S void glMultiTexCoord1f(GLenum p0, GLfloat p1)

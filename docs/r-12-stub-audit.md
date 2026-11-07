@@ -26,6 +26,10 @@ glMapBufferRange(...)  -> 因缓冲区无存储而失败，返回 NULL
 
 `glBufferStorage` 已修复，但**其余 484 个 stub 尚未审计**。本报告补上。
 
+> 2026-11-07 更新：`glMultiDrawArraysIndirect` / `glMultiDrawElementsIndirect`
+> 已从 `S` 改为 `C`（原生扩展优先，否则逐条 indirect 回退），当前 stub 总数为
+> **482**。下面的分类结果基于当时的 484 个 stub，其余结论不变。
+
 ---
 
 ## 2. 审计结果

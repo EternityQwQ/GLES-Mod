@@ -173,14 +173,14 @@ v2 配置里只有一个与后端有关的 `ToggleableEnv`：
 | 类别 | 数量 | 来源 | 行为 |
 |---|---|---|---|
 | `F` 转发 | 337 | `generated_forwarders.c`（生成） | 首次调用解析真实 GLES 符号并缓存，之后直接跳转 |
-| `C` 定制 | 28 | `custom.c` | 手写，因为行为必须不同 |
-| `S` 安全桩 | 484 | `generated_forwarders.c`（生成） | 空实现，返回中性值并记录一次降级事件 |
+| `C` 定制 | 30 | `custom.c` | 手写，因为行为必须不同 |
+| `S` 安全桩 | 482 | `generated_forwarders.c`（生成） | 空实现，返回中性值并记录一次降级事件 |
 
 `native/symbols.def` 是「哪个符号属于哪一类」的**唯一真源**。
 `native/tools/gen_symbols_def.py` 与 `gen_gl_forwarders.py` 依它生成代码，
 不要手改生成产物。
 
-**484 个桩是特性，不是缺漏。** 另一种做法是让符号缺失，而 LWJGL 解析不到符号
+**482 个桩是特性，不是缺漏。** 另一种做法是让符号缺失，而 LWJGL 解析不到符号
 会直接中断启动。用桩，游戏能跑起来，并且能准确告诉你哪些功能是静默失效的：
 
 ```
@@ -190,7 +190,7 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  真实数量 + 1
 那多出来的一个扩展是 `GL_ARB_draw_buffers_blend`，因为有些代码路径会先检测
 它再决定是否使用多目标混合。
 
-### 4.2 28 个定制实现
+### 4.2 30 个定制实现
 
 它们存在的场合是「单纯转发会得到错误结果」。两个能说明模式的例子：
 
@@ -540,8 +540,9 @@ GlesCapabilities{active=true, gles=3.2, reportedGl=3.2, degradeLevel=1,
  maxTextureSize=16384, maxSamples=4, maxVertexAttribs=32}
 ```
 
-ES 上 `multiDraw=false` 是**预期行为，不是故障** ——
-这正是 Sodium 从 multi-draw 退化为逐区块提交的原因。
+ES 上 `multiDraw=false` 是**预期行为，不是故障** —— 它表示驱动没有暴露
+`GL_EXT_multi_draw_indirect`。本实现只对该扩展的 indirect 入口做原生加速；
+非 indirect 的 `glMultiDraw*` 始终走循环拆解。
 
 ---
 

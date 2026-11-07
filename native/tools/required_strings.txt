@@ -130,3 +130,8 @@ GLESMOD_RULE_S_BUILTIN_INT_ARGS
 # normalises the message to identifier/space tokens; this marker exists only
 # in that path, so a stale .so cannot silently reintroduce the crash.
 GLESMOD_ERROR_DIRECTIVE_NORMALIZED
+
+# Multi-Draw native backend detection. A device exposing
+# GL_EXT_multi_draw_indirect must use the driver entry point instead of the
+# per-draw indirect loop; a stale .so would silently keep looping.
+GLESMOD_MULTIDRAW_NATIVE

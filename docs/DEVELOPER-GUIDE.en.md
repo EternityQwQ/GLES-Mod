@@ -186,14 +186,14 @@ The chain is:
 | Kind | Count | Source | Behaviour |
 |---|---|---|---|
 | `F` forwarded | 337 | `generated_forwarders.c` (generated) | Resolve the real GLES symbol once, cache it, tail-call it |
-| `C` custom | 28 | `custom.c` | Hand-written, because behaviour must differ |
-| `S` safe stub | 484 | `generated_forwarders.c` (generated) | No-op that returns a neutral value and records a degradation event |
+| `C` custom | 30 | `custom.c` | Hand-written, because behaviour must differ |
+| `S` safe stub | 482 | `generated_forwarders.c` (generated) | No-op that returns a neutral value and records a degradation event |
 
 `native/symbols.def` is the **single source of truth** for which symbol is in
 which class. `native/tools/gen_symbols_def.py` and `gen_gl_forwarders.py`
 generate the code from it; they are not edited by hand.
 
-**Why 484 stubs is a feature, not a gap.** The alternative is a missing symbol,
+**Why 482 stubs is a feature, not a gap.** The alternative is a missing symbol,
 which LWJGL cannot resolve, which aborts startup. A stub lets the game run and
 tells you exactly which feature is silently inert:
 
@@ -204,7 +204,7 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  real count + 1
 The one extra extension is `GL_ARB_draw_buffers_blend`, reported because some
 code paths test for it before using multi-target blending.
 
-### 4.2 Custom implementations (28)
+### 4.2 Custom implementations (30)
 
 These exist where a pure forward is wrong. Two examples that show the pattern:
 
@@ -592,8 +592,10 @@ GlesCapabilities{active=true, gles=3.2, reportedGl=3.2, degradeLevel=1,
  maxTextureSize=16384, maxSamples=4, maxVertexAttribs=32}
 ```
 
-`multiDraw=false` on ES is expected and is not a fault — it is why Sodium falls
-back from multi-draw to per-chunk submission.
+`multiDraw=false` on ES is expected and is not a fault — it means the driver
+does not expose `GL_EXT_multi_draw_indirect`. This implementation only uses the
+native indirect entry points from that extension; the non-indirect
+`glMultiDraw*` calls always use the loop fallback.
 
 ---
 

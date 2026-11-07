@@ -98,6 +98,16 @@ int glesmod_env_int(const char *name, int fallback);
 /** 获取环境变量字符串，缺失时返回 NULL。 */
 const char *glesmod_env_str(const char *name);
 
+/* gl.xml: GL_EXTENSIONS = 0x1F03 */
+#define GLESMOD_GL_EXTENSIONS 0x1F03
+
+/**
+ * 判断空格分隔的扩展串是否包含完整 token。
+ *
+ * 用完整 token 匹配而不是裸 strstr：目标名可能是另一个扩展名的前缀。
+ */
+int glesmod_extension_present(const char *extensions, const char *name);
+
 /* ------------------------------------------------------------------ */
 /* GLES 函数解析                                                       */
 /* ------------------------------------------------------------------ */
@@ -384,6 +394,11 @@ GLESMOD_EXPORT void   glMultiDrawArrays(GLenum mode, const GLint *first,
 GLESMOD_EXPORT void   glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count,
                                                     GLenum type, const void *const *indices,
                                                     GLsizei drawcount, const GLint *basevertex);
+GLESMOD_EXPORT void   glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
+                                                GLsizei drawcount, GLsizei stride);
+GLESMOD_EXPORT void   glMultiDrawElementsIndirect(GLenum mode, GLenum type,
+                                                  const void *indirect,
+                                                  GLsizei drawcount, GLsizei stride);
 GLESMOD_EXPORT void   glBufferStorage(GLenum target, GLsizeiptr size,
                                       const void *data, GLbitfield flags);
 GLESMOD_EXPORT void * glMapBufferRange(GLenum target, GLintptr offset,

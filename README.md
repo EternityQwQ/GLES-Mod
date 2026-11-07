@@ -49,7 +49,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **Native ES 3.2 backend** | 849 exported GL symbols — 337 forwarded, 28 custom implementations, 484 safe stubs. No per-call JNI. |
+| **Native ES 3.2 backend** | 849 exported GL symbols — 337 forwarded, 30 custom implementations, 482 safe stubs. No per-call JNI. |
 | **Optional ANGLE backend** | An opt-in renderer-plugin toggle routes the final ES calls through ANGLE → Vulkan. Default **off**; use it only when the vendor GLES driver misbehaves. Verified on Adreno 619 and Mali-G57. |
 | **GLSL → GLSL ES converter** | Desktop GLSL is not GLSL ES. The biggest difference: **desktop GLSL silently converts `int` → `float`, GLSL ES refuses to**. This converter rewrites the source at load time so shaders that work on desktop keep working on ES. It is the single most important component in this project. |
 | **Capability probing & graceful degradation** | Probes what the device actually supports, reports it, and degrades rather than crashing. Missing a feature is a decision, not an accident. |
@@ -171,8 +171,11 @@ Stated plainly, because pretending otherwise helps nobody:
 
 - **No compute / SSBO / tessellation.** GLES 3.2 does not have them. Shaders
   that need them are skipped with a logged reason — not silently broken.
-- **Multi-Draw is unavailable**, so Sodium chunk rendering falls back to
-  per-draw submission: a small performance cost.
+- **Multi-Draw is not in GLES 3.2 core.** When the driver exposes
+  `GL_EXT_multi_draw_indirect`, the indirect entry points use the native driver
+  path; the non-indirect `glMultiDraw*` calls still use per-draw loops. Without
+  the extension, Sodium chunk rendering also falls back to per-draw submission:
+  a small performance cost.
 - **Not every possible shader compiles.** The converter covers the constructs
   we have met and can prove; when it cannot convert, it forwards the original
   source *and* dumps both versions to `glesmod/native.log` so the failure is
@@ -247,7 +250,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **原生 ES 3.2 后端** | 导出 849 个 GL 符号 —— 337 个转发、28 个定制实现、484 个安全桩。热点路径不经过 JNI。 |
+| **原生 ES 3.2 后端** | 导出 849 个 GL 符号 —— 337 个转发、30 个定制实现、482 个安全桩。热点路径不经过 JNI。 |
 | **可选 ANGLE 后端** | 插件里的实验性开关可把最终 ES 调用交给 ANGLE → Vulkan。默认**关闭**；仅在厂商 GLES 驱动异常时使用。已在 Adreno 619 与 Mali-G57 验证。 |
 | **GLSL → GLSL ES 转换器** | 桌面 GLSL 不是 GLSL ES。最大的差异是：**桌面 GLSL 允许 `int` → `float` 隐式转换，GLSL ES 不允许**。本转换器在着色器加载时改写源码，让桌面能跑的着色器在 ES 上也能跑。这是本项目最关键的部件。 |
 | **能力探测与优雅降级** | 探测设备真实能力并如实上报；能力不足时降级而不是崩溃。缺功能是一个**经过判断的决定**，不是意外。 |
@@ -361,7 +364,9 @@ py -X utf8 native/tools/run_all_gates.py
 
 - **不支持 compute / SSBO / 曲面细分**。GLES 3.2 没有这些能力。需要它们的着色器会被
   **记录原因后显式跳过**，而不是静默地坏掉。
-- **Multi-Draw 不可用**，Sodium 的区块渲染退化为逐次提交：有少量性能损失。
+- **Multi-Draw 不在 GLES 3.2 核心中**。驱动提供 `GL_EXT_multi_draw_indirect` 时，
+  indirect 入口优先使用原生路径；非 indirect 的 `glMultiDraw*` 仍然走逐条循环。
+  没有该扩展时，Sodium 的区块渲染也会退化为逐次提交：有少量性能损失。
 - **并非所有着色器都能转换**。转换器覆盖的是我们**遇到过并能证明**的构造；转换失败时
   它会转发原始源码，**并把两份都写进 `glesmod/native.log`**，
   让失败可诊断而不是成谜。

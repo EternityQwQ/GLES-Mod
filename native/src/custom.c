@@ -12,7 +12,7 @@
  *   glLogicOp               ES 无逻辑运算                      忽略 + 降级
  *   glGetTexImage           ES 无纹理回读                      用 FBO + ReadPixels
  *   glDrawPixels            ES 无                              忽略 + 降级（NativeImage 路径）
- *   glMultiDraw*            ES 无多重绘制                      拆解为循环绘制
+ *   glMultiDraw*            ES 无核心 Multi-Draw              仅 indirect 扩展原生，其他循环
  *   glBufferStorage         ES 无（GL 4.4 功能）               用 glBufferData 真实
  *                                                               分配 + 记录降级
  *   glMapBufferRange        桌面专属映射位 ES 非法              剥离非法位后转发
@@ -39,6 +39,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* gl.xml: GL_NUM_EXTENSIONS = 0x821D, GL_EXTENSIONS = 0x1F03 */
+#define GLESMOD_ENUM_GL_NUM_EXTENSIONS 0x821D
+#define GLESMOD_ENUM_GL_EXTENSIONS     GLESMOD_GL_EXTENSIONS
+
+/* glGetError 的最小类型；纹理探针与 Multi-Draw 探测共用。 */
+typedef GLenum (*get_err_fn_t)(void);
+static get_err_fn_t texprobe_get_error(void);
+static void drain_errors(get_err_fn_t get_err);
 
 /* ================================================================== */
 /* 辅助：取得 GLES 函数指针                                            */
@@ -354,20 +363,106 @@ void glGetTexImage(GLenum target, GLint level, GLenum format,
 }
 
 /* ================================================================== */
-/* glMultiDraw* —— ES 无多重绘制，拆解为循环                           */
+/* glMultiDraw* —— 仅 indirect 扩展原生，其他拆解为循环                   */
 /* ================================================================== */
 
 /*
- * 这是任务书 P2-04 要求的降级路由。原版 MC 不使用（见 O-02），
- * 但 Sodium 会使用，因此必须实现。
+ * ES 3.2 核心没有 Multi-Draw。本实现只对
+ * GL_EXT_multi_draw_indirect 做原生加速：
+ *       glMultiDrawArraysIndirectEXT / glMultiDrawElementsIndirectEXT
  *
- * 拆解语义：
- *   glMultiDrawElements(mode, count, type, indices, drawcount)
- *   == for (i = 0; i < drawcount; i++) glDrawElements(mode, count[i], type, indices[i]);
+ * 基础 glMultiDrawArrays / glMultiDrawElements / BaseVertex 没有原生路径，
+ * 始终走循环拆解；ANGLE 的 multi-draw 扩展也不参与。
  *
- * 性能影响：每增加一次绘制调用，CPU 开销增加。在 ES 上这是唯一可行方案。
- * 仅在首次调用时记录降级事件，避免每帧刷屏。
+ * 检测原则（参考 MobileGlues 的结论，实现独立编写）：
+ *   1. 只认「扩展串 + 函数指针」同时存在。Android 的 EGL 包装层可能
+ *      返回一个存在但不可用的入口点，单看符号不算证据。
+ *   2. 首次调用做一次错误探测：调用前抽干错误队列，调用后若仍有错误，
+ *      将该后端标记为 FAILED 并回退循环，后续不再尝试。
+ *   3. 原生成功不记降级；只有原生不可用/探测失败才记录
+ *      MULTI_DRAW_UNSUPPORTED。
  */
+
+typedef void (*glesmod_md_arrays_indirect_fn)(GLenum, const void *, GLsizei,
+                                              GLsizei);
+typedef void (*glesmod_md_elements_indirect_fn)(GLenum, GLenum, const void *,
+                                                GLsizei, GLsizei);
+
+/* GL 4.6 DrawArraysIndirect / DrawElementsIndirect 命令布局：
+ * 前者 4 个 32 位字，后者 5 个。stride=0 时使用这个紧凑布局。 */
+#define GLESMOD_DRAW_ARRAYS_INDIRECT_STRIDE   16
+#define GLESMOD_DRAW_ELEMENTS_INDIRECT_STRIDE 20
+
+typedef enum {
+    GLESMOD_MD_UNPROBED = 0,
+    GLESMOD_MD_WORKING,
+    GLESMOD_MD_FAILED
+} glesmod_md_state_t;
+
+typedef struct {
+    int initialized;
+    glesmod_md_arrays_indirect_fn arrays_indirect;
+    glesmod_md_elements_indirect_fn elements_indirect;
+    glesmod_md_state_t arrays_indirect_state;
+    glesmod_md_state_t elements_indirect_state;
+} glesmod_multidraw_t;
+
+static glesmod_multidraw_t g_multidraw;
+
+static void glesmod_multidraw_detect(void)
+{
+    if (g_multidraw.initialized) return;
+    g_multidraw.initialized = 1;
+
+    const char *ext = (const char *)glGetString(GLESMOD_ENUM_GL_EXTENSIONS);
+    if (!glesmod_extension_present(ext, "GL_EXT_multi_draw_indirect")) {
+        glesmod_log("Multi-Draw: 未检测到 GL_EXT_multi_draw_indirect，"
+                    "使用逐条 indirect 回退");
+        return;
+    }
+
+    g_multidraw.arrays_indirect =
+        (glesmod_md_arrays_indirect_fn)glesym_resolve(
+            "glMultiDrawArraysIndirectEXT");
+    g_multidraw.elements_indirect =
+        (glesmod_md_elements_indirect_fn)glesym_resolve(
+            "glMultiDrawElementsIndirectEXT");
+
+    if (g_multidraw.arrays_indirect != NULL ||
+        g_multidraw.elements_indirect != NULL) {
+        glesmod_log("Multi-Draw: 检测到 GL_EXT_multi_draw_indirect，"
+                    "优先使用原生 indirect 入口"
+                    "（GLESMOD_MULTIDRAW_NATIVE）");
+    } else {
+        glesmod_log("Multi-Draw: GL_EXT_multi_draw_indirect 已声明但入口点"
+                    "不可用，使用逐条 indirect 回退");
+    }
+}
+
+/* 首次调用探测：UNPROBED 时抽干错误，调用后检查一次。 */
+static int glesmod_multidraw_begin(glesmod_md_state_t *state)
+{
+    if (*state == GLESMOD_MD_FAILED) return 0;
+    if (*state == GLESMOD_MD_UNPROBED) {
+        get_err_fn_t get_err = texprobe_get_error();
+        if (get_err != NULL) drain_errors(get_err);
+    }
+    return 1;
+}
+
+static int glesmod_multidraw_end(glesmod_md_state_t *state)
+{
+    if (*state == GLESMOD_MD_UNPROBED) {
+        get_err_fn_t get_err = texprobe_get_error();
+        if (get_err != NULL && get_err() != 0 /* GL_NO_ERROR */) {
+            *state = GLESMOD_MD_FAILED;
+            return 0;
+        }
+        *state = GLESMOD_MD_WORKING;
+    }
+    return 1;
+}
+
 void glMultiDrawElements(GLenum mode, const GLsizei *count, GLenum type,
                          const void *const *indices, GLsizei drawcount) {
     typedef void (*draw_elements_t)(GLenum, GLsizei, GLenum, const void *);
@@ -446,6 +541,76 @@ void glMultiDrawElementsBaseVertex(GLenum mode, const GLsizei *count, GLenum typ
         glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
                         "BaseVertex 不可用，已降级为 glDrawElements（几何体可能偏移）");
     }
+}
+
+void glMultiDrawArraysIndirect(GLenum mode, const void *indirect,
+                               GLsizei drawcount, GLsizei stride) {
+    typedef void (*draw_arrays_indirect_t)(GLenum, const void *);
+    static draw_arrays_indirect_t real = NULL;
+
+    glesmod_lazy_init();
+
+    if (drawcount <= 0) return;
+    if (stride < 0) {
+        glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
+                        "glMultiDrawArraysIndirect: stride < 0，已忽略");
+        return;
+    }
+
+    glesmod_multidraw_detect();
+    if (g_multidraw.arrays_indirect != NULL &&
+        glesmod_multidraw_begin(&g_multidraw.arrays_indirect_state)) {
+        g_multidraw.arrays_indirect(mode, indirect, drawcount, stride);
+        if (glesmod_multidraw_end(&g_multidraw.arrays_indirect_state)) return;
+        glesmod_log("Multi-Draw: 原生 ArraysIndirect 探测失败，改用循环");
+    }
+
+    RESOLVE_OR_RETURN(real, "glDrawArraysIndirect", );
+
+    const GLsizei step = stride ? stride : GLESMOD_DRAW_ARRAYS_INDIRECT_STRIDE;
+    const uintptr_t base = (uintptr_t)indirect;
+    for (GLsizei i = 0; i < drawcount; i++) {
+        real(mode, (const void *)(base + (uintptr_t)i * (uintptr_t)step));
+    }
+
+    glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
+                    "Multi-Draw Indirect 原生不可用，"
+                    "已降级为逐条 glDrawArraysIndirect");
+}
+
+void glMultiDrawElementsIndirect(GLenum mode, GLenum type, const void *indirect,
+                                 GLsizei drawcount, GLsizei stride) {
+    typedef void (*draw_elements_indirect_t)(GLenum, GLenum, const void *);
+    static draw_elements_indirect_t real = NULL;
+
+    glesmod_lazy_init();
+
+    if (drawcount <= 0) return;
+    if (stride < 0) {
+        glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
+                        "glMultiDrawElementsIndirect: stride < 0，已忽略");
+        return;
+    }
+
+    glesmod_multidraw_detect();
+    if (g_multidraw.elements_indirect != NULL &&
+        glesmod_multidraw_begin(&g_multidraw.elements_indirect_state)) {
+        g_multidraw.elements_indirect(mode, type, indirect, drawcount, stride);
+        if (glesmod_multidraw_end(&g_multidraw.elements_indirect_state)) return;
+        glesmod_log("Multi-Draw: 原生 ElementsIndirect 探测失败，改用循环");
+    }
+
+    RESOLVE_OR_RETURN(real, "glDrawElementsIndirect", );
+
+    const GLsizei step = stride ? stride : GLESMOD_DRAW_ELEMENTS_INDIRECT_STRIDE;
+    const uintptr_t base = (uintptr_t)indirect;
+    for (GLsizei i = 0; i < drawcount; i++) {
+        real(mode, type, (const void *)(base + (uintptr_t)i * (uintptr_t)step));
+    }
+
+    glesmod_degrade(GLESMOD_DEGRADE_MULTI_DRAW_UNSUPPORTED,
+                    "Multi-Draw Indirect 原生不可用，"
+                    "已降级为逐条 glDrawElementsIndirect");
 }
 
 /* ================================================================== */
@@ -753,8 +918,6 @@ static int fixup_pixel_type(const char *who, GLint internalformat,
  * 【限流改为按参数指纹】不同参数组合各详列一次（上限 16 条）。
  *   这既能捞到 Iris 真正用的那组，又不会因每帧重试而刷屏。
  */
-typedef GLenum (*get_err_fn_t)(void);
-
 static get_err_fn_t texprobe_get_error(void)
 {
     static get_err_fn_t f = NULL;
@@ -1629,10 +1792,6 @@ void *glMapBufferRange(GLenum target, GLintptr offset, GLsizeiptr length,
 #define GLESMOD_ENUM_GL_VERSION   0x1F02
 #define GLESMOD_ENUM_GL_RENDERER  0x1F01
 #define GLESMOD_ENUM_GL_GLSL_VER  0x8B8C
-
-/* gl.xml: GL_NUM_EXTENSIONS = 0x821D, GL_EXTENSIONS = 0x1F03 */
-#define GLESMOD_ENUM_GL_NUM_EXTENSIONS 0x821D
-#define GLESMOD_ENUM_GL_EXTENSIONS     0x1F03
 
 /*
  * 追加到扩展列表的那一条。

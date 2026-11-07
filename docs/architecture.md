@@ -273,7 +273,7 @@ glesmod-template-1.21.1/
 │   │   └── gles_backend.h        # 对外 ABI
 │   ├── src/
 │   │   ├── core.c                # 加载/解析/状态文件/能力表
-│   │   ├── custom.c              # 28 个定制实现（含 proxy texture 仿真）
+│   │   ├── custom.c              # 30 个定制实现（含 proxy texture / Multi-Draw）
 │   │   ├── enum.c                # GL 枚举名
 │   │   ├── generated_forwarders.c# 转发与安全桩（生成产物）
 │   │   ├── probe.c               # 几何诊断探针
@@ -421,7 +421,7 @@ typedef struct {
     int  gl_major, gl_minor;      /* 映射后对外声称的桌面 GL 版本 */
 
     /* 功能支持位 */
-    bool multi_draw;              /* GL_EXT_multi_draw_arrays 或 ES 3.2 原生 */
+    bool multi_draw;              /* GL_EXT_multi_draw_indirect（仅 indirect 原生） */
     bool compute_shaders;         /* ES 3.1+ 且驱动实际支持 */
     bool persistent_mapping;      /* GL_EXT_buffer_storage / ES 3.2 */
     bool instancing;              /* ES 3.0 原生，恒为 true，保留供降级开关 */
