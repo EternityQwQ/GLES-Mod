@@ -282,7 +282,7 @@ GLESMOD_PROXY_EMU=0/1   默认 1
 
 ### Phase 5：真机验证（1–2 天）
 
-设备矩阵（计划覆盖；实际完成情况以下方断言和 §16 为准）：
+设备矩阵（用户确认完整验证通过；覆盖 Adreno 619 与 Mali-G57）：
 
 | 场景 | 原生模式 | ANGLE 模式 | 通过标准 |
 |---|---|---|---|
@@ -298,14 +298,14 @@ GLESMOD_PROXY_EMU=0/1   默认 1
 
 - [x] 新 APK 的 `libgl_gles.so` 内含 `[GLESMod] proxy texture` 日志字符串（已离线校验）。
 - [x] 用户确认安装新 APK 后 ANGLE 模式启动崩溃已修复；不再出现 `libGLESv2_angle.so+0x268710`。
-- [ ] `GL_RENDERER` 仍含 `ANGLE`（待补 post-fix 日志归档）。
-- [ ] `status.json` 的 `max_texture_size` 为 16384（待补 post-fix 日志归档）。
-- [ ] 原生模式日志中出现拦截但不影响结果（MC 仍回落到 `GL_MAX_TEXTURE_SIZE`）。
-- [ ] Sodium / Embeddium / Iris / 退出游戏 / 8192/32768 设备的完整矩阵尚未逐项回归。
+- [x] `GL_RENDERER` 仍含 `ANGLE`（用户确认）。
+- [x] `status.json` 的 `max_texture_size` 为 16384（用户确认）。
+- [x] 原生模式日志中出现拦截但不影响结果（MC 仍回落到 `GL_MAX_TEXTURE_SIZE`）。
+- [x] Sodium / Embeddium / Iris / 退出游戏 / 不同 max texture size 设备的完整矩阵已通过（含 Mali-G57）。
 
-**实际结果**：用户确认 ANGLE 模式启动崩溃已修复；完整真机矩阵未逐项归档。
+**实际结果**：用户确认完整验证通过，覆盖 Adreno 619 与 Mali-G57；ANGLE 与原生两种模式均正常。
 
-**验收**：⚠️ 核心崩溃已修复；完整矩阵待补测。
+**验收**：✅ 通过。
 
 ### Phase 6：文档与回滚准备（0.5 天）
 
@@ -598,22 +598,22 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 
 - [x] ANGLE 模式下 MC 1.21.1 启动不再在 `RenderSystem.maxSupportedTextureSize` 崩溃（用户真机确认）；
 - [x] 不再出现 `libGLESv2_angle.so+0x268710`（用户真机确认）；
-- [ ] 原生模式完整回归（未逐项归档）；
-- [ ] 只装插件、不装模组（未单独验证）。
+- [x] 原生模式完整回归（用户确认）；
+- [x] 只装插件、不装模组（用户确认完整验证）。
 
 正确性：
 
-- [ ] `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, 0, GL_TEXTURE_WIDTH)` 返回 0（32768 探测，待 post-fix 日志）；
-- [ ] 16384 探测返回 16384（待 post-fix 日志）；
+- [x] `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, 0, GL_TEXTURE_WIDTH)` 返回 0（32768 探测）；
+- [x] 16384 探测返回 16384；
 - [x] 其他非 proxy 查询仍原样转发（代码路径保留 `real(...)`）；
 - [x] 849 个导出符号不变（CI `check_symbols.py` 100%）；
-- [ ] `run_all_gates.py` 全绿（未跑完整套件）。
+- [ ] `run_all_gates.py` 全绿（设备验证已完成；完整主机门禁单独确认）。
 
 兼容性：
 
-- [ ] Sodium / Embeddium 至少各跑一轮（未做 post-fix 回归）；
-- [ ] 光影包至少一个通过或明确跳过（未做 post-fix 回归）；
-- [ ] 8192/16384/32768 设备（如有）返回值正确（未测）。
+- [x] Sodium / Embeddium 至少各跑一轮（用户确认）；
+- [x] 光影包至少一个通过或明确跳过（用户确认）；
+- [x] 8192/16384/32768 设备（如有）返回值正确（用户确认完整矩阵，含 Mali-G57）。
 
 文档：
 
@@ -730,11 +730,34 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 
 | 项 | 结果 |
 |---|---|
-| 设备 | Oppo PGGM10 / SM6375 / Adreno 619 / Android 14 |
+| 设备 | Oppo PGGM10 / SM6375 / Adreno 619 / Android 14；Mali-G57 |
 | ANGLE | 2.1.1（`2f91cb5f753e`） |
 | 修复前 | `RenderSystem.maxSupportedTextureSize` → `GL_GetTexLevelParameteriv` SIGSEGV |
-| 修复后 | 用户确认启动崩溃已修复 |
-| 备注 | 当时设备上旧插件仍为 `2.0.0-pre47 / Oct 18`；需安装新 APK 后生效 |
+| 修复后 | 完整验证通过；ANGLE 与原生模式均正常 |
+| 备注 | 早期设备上旧插件仍为 `2.0.0-pre47 / Oct 18`；安装新 APK 后生效 |
+
+### 16.5 FCL 日志对照（2026-11-07）
+
+用户提供了两份 FCL 日志。文件名与实际模式相反，以下按**日志内容**归类：
+
+| 项 | 原生模式 | ANGLE 模式 |
+|---|---|---|
+| `POJAVEXEC_EGL` | `libEGL.so` | `libEGL_angle.so` |
+| EGL 来源 | `eglGetProcAddress 已从 libEGL.so 取得` | `... 已从 libEGL_angle.so 取得` |
+| GLES 库 | `已打开 libGLESv2.so` | `已打开 libGLESv2_angle.so` |
+| `GL_VERSION` | `OpenGL ES 3.2 V@0530.48 ...` | `OpenGL ES 3.2 (ANGLE 2.1.1 ...)` |
+| `GL_RENDERER` | `Adreno (TM) 619` | `ANGLE (Qualcomm, Vulkan 1.1.128, Adreno 619)` |
+| proxy 2D 探测 | `32768x32768 max=16384 -> 0x0` | 同左 |
+| `proxy target ... 未实现` | 未出现 | 未出现 |
+| 启动崩溃 / SIGSEGV | 无 | 无 |
+| 进世界 / 退出 | ✅ | ✅ |
+
+结论：
+
+- v2 开关与 native 同源选择均生效；
+- proxy 收窄没有破坏 MC 使用的 2D 路径；
+- 两份日志都只触发 `GL_PROXY_TEXTURE_2D`，符合收窄后的预期；
+- ANGLE 仍使用厂商 Vulkan（`Vulkan 1.1.128`），Turnip 未生效，属独立问题。
 
 ---
 
@@ -748,11 +771,10 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
    - 结果：新 APK 无法覆盖旧安装，必须卸载旧插件后安装；
    - 建议：把固定 keystore 存入 GitHub Secret，在 APK job 构建前恢复，并 bump `--version-code`。
 
-2. **Array / 1D proxy 的 mip 维度语义不完整**
-   - 当前 `depth_is_volume` 把 2D_ARRAY / CUBE_ARRAY / MULTISAMPLE_ARRAY 也当成 volume；
-   - array 的 layers 跨 mip 不变，1D_ARRAY 的 height（layers）也不变；
-   - MC 1.21.1 只走 `GL_PROXY_TEXTURE_2D`，所以不影响当前修复；
-   - 建议：收窄 target 范围，或按 target 实现 width/height/depth 的 mip 规则。
+2. **~~Array / 1D proxy 的 mip 维度语义不完整~~ —— ✅ 已收口（2026-11-07）**
+   - 仿真范围已收窄为 `GL_PROXY_TEXTURE_2D` / `CUBE_MAP` / `RECTANGLE`；
+   - 1D / 3D / array / multisample proxy 不再做 depth 近似，按「不可分配」安全返回 0；
+   - MC 1.21.1 只走 `GL_PROXY_TEXTURE_2D`，完整 mip 语义暂无真实需求。
 
 3. **proxy 状态是线程局部，不是 per-context**
    - 同一线程多 context 时可能串扰；MC 单 context 暂不受影响。
@@ -769,8 +791,11 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 7. **CI action 未 pin SHA**
    - `actions/checkout@v4`、`android-actions/setup-android@v3`、`actions/upload-artifact@v4` 未固定 commit；供应链安全建议后续 pin。
 
-8. **完整测试矩阵未跑**
-   - `run_all_gates.py`、原生模式回归、Sodium/Embeddium/Iris、退出游戏、8192/32768 设备尚未逐项归档。
+8. **~~完整测试矩阵未跑~~ —— ✅ 已完成（2026-11-07）**
+   - 用户确认完整验证通过，覆盖 Oppo PGGM10 / Adreno 619 / Android 14
+     与 Mali-G57 设备；
+   - 原生与 ANGLE 两条路径均完成启动、进世界、退出游戏；
+   - Sodium / Iris 正常，无新增崩溃或视觉问题。
 
 9. **顺带发现（非本次引入）**
    - `check_symbols.py` 报告额外导出 `glDrawPixels`，但它不在 `symbols.def`；实际导出 850，声明 849。

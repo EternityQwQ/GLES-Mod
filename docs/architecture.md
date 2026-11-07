@@ -127,7 +127,7 @@ bool dlsym_EGL() {
 **三点关键事实**：
 
 1. EGL 库由 `POJAVEXEC_EGL` 环境变量决定，兜底为 `libEGL.so`
-2. ANGLE 仅在 `LIBGL_GLES == "libGLESv2_angle.so"` 时启用
+2. `LIBGL_GLES` 只在等于 `libGLESv2_angle.so` 时**强制覆盖** EGL 为 ANGLE；否则 EGL 完全由 `POJAVEXEC_EGL` 决定。本项目通过后者开启 ANGLE，因此**不设置** `LIBGL_GLES`
 3. **ANGLE 不是任何内置渲染器的默认配置**
 
 #### 内置渲染器的 EGL 配置
@@ -172,7 +172,44 @@ bundle->context = eglCreateContext_p(g_EglDisplay, bundle->config, /*...*/, egl_
 系统 libEGL.so + 厂商 GLES 驱动（原生执行）
 ```
 
-系统 `libEGL.so` 是厂商 EGL，**直接对接设备 GLES 驱动，不是翻译层**。因此「不接管 EGL」的决策成立。
+系统 `libEGL.so` 是厂商 EGL，**直接对接设备 GLES 驱动，不是翻译层**。因此「默认不接管 EGL」的决策成立。
+
+#### 可选路径：ANGLE 作为 GLES 后端
+
+默认路径是「`libgl_gles.so` → 系统 EGL + 厂商 GLES」。插件 v2 额外提供一个**默认关闭**的实验性开关：
+
+```text
+设置 → 插件 → GLES Mod Renderer → 使用 ANGLE 作为 GLES 驱动（实验性）
+```
+
+打开后只注入一个环境变量（`ToggleableEnv`）：
+
+```text
+POJAVEXEC_EGL=libEGL_angle.so
+```
+
+FCL 的 `dlsym_EGL()` 会加载 ANGLE 的 EGL；native 的 `get_gles_handle()` 看到
+`POJAVEXEC_EGL` 含 `angle` 后，兜底句柄也选择 `libGLESv2_angle.so`，保证 EGL 与
+GLES **同源**。插件**不设置** `LIBGL_GLES`。
+
+链路变为：
+
+```
+我们的 libgl_gles.so（桌面 GL → ES 3.x 映射）
+    ↓ 输出 ES 调用
+ANGLE libGLESv2_angle.so（ES → Vulkan）
+    ↓
+设备 Vulkan 驱动
+```
+
+这是**第二层翻译**，只在系统 GLES 驱动异常或需要 ANGLE 的 Vulkan 路径时启用；
+默认路径没有这层开销。ANGLE 模式的能力值可能与原生不同（例如实测
+`maxTextureUnits=192`、`maxVertexAttribs=16`，原生为 96/32），这属于后端差异，
+不是降级事件。
+
+> ⚠️ **ANGLE 2.1.1 存在 proxy texture 空指针 bug**：
+> `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, ...)` 会崩溃。native 层已仿真
+> proxy texture（见 §5.4 / `docs/proxy-texture-fix-plan.md`），ANGLE 路径可以正常启动。
 
 #### ⚠️ 必须处理的隐患：插件渲染器不自动设置 `LIBGL_ES`
 
@@ -224,33 +261,30 @@ glesmod-template-1.21.1/
 ├── src/main/java/com/youyimc/glesmod/     # NeoForge mod 形态（Java）
 │   ├── GLESMod.java              # 模组入口（common）
 │   ├── GLESModClient.java        # 客户端入口
-│   ├── config/                   # 配置系统
+│   ├── Config.java               # 配置系统（顶层，无 config/ 包）
 │   ├── capability/               # 能力探测与上报（GlesCapabilityProvider 实现）
 │   ├── compat/                   # Sodium / Embeddium 软依赖联动
 │   ├── degrade/                  # 降级事件收集与日志
-│   └── backend/                  # native 绑定（JNI 声明 + 加载器）
+│   └── backend/                  # 读取 status.json（无 JNI）
 │
 ├── native/                       # 【核心】C/C++ 源码
 │   ├── CMakeLists.txt
 │   ├── include/
 │   │   └── gles_backend.h        # 对外 ABI
 │   ├── src/
-│   │   ├── entry_gl11.c          # GL 1.x 符号导出
-│   │   ├── entry_gl20.c          # GL 2.x 符号导出
-│   │   ├── entry_gl30.c          # GL 3.x 符号导出
-│   │   ├── caps.c                # 能力查询
-│   │   ├── state.c               # 状态缓存（阶段三）
-│   │   ├── shader_conv.c         # 着色器转换接入（见 §6）
-│   │   └── log.c                 # 降级事件记录
-│   └── tools/
-│       └── check_symbols.sh      # 符号覆盖率检测（见 §5.3）
+│   │   ├── core.c                # 加载/解析/状态文件/能力表
+│   │   ├── custom.c              # 28 个定制实现（含 proxy texture 仿真）
+│   │   ├── enum.c                # GL 枚举名
+│   │   ├── generated_forwarders.c# 转发与安全桩（生成产物）
+│   │   ├── probe.c               # 几何诊断探针
+│   │   └── shader.c              # 桌面 GLSL → GLSL ES 转换器
+│   ├── symbols.def               # 849 个导出符号的唯一真源
+│   └── tools/                    # Python 门禁与生成器（见 §5.3）
 │
 ├── fcl-plugin/                   # 【阶段一并行】FCL 渲染器插件壳
-│   ├── build.gradle.kts          # Android 应用模块
-│   ├── src/main/AndroidManifest.xml
-│   │     # meta-data: fclPlugin_V2 = @string/config
-│   └── src/main/res/values/strings.xml
-│         # <string name="config"> JSON 形式的 RendererConfigV2
+│   ├── build-plugin.ps1          # APK 构建脚本
+│   ├── AndroidManifest.xml       # v1 + v2 插件声明
+│   └── res/values/strings.xml    # renderer_config（RendererConfigV2 JSON）
 │
 └── docs/
     ├── architecture.md           # 本文档
@@ -259,32 +293,51 @@ glesmod-template-1.21.1/
 
 ### 3.1 插件壳的配置内容
 
-`fcl-plugin/src/main/res/values/strings.xml` 中的 `config` 资源（JSON）：
+插件清单同时保留 **v1** 与 **v2** 两套声明：旧版 FCL 只认识 v1；新版 FCL
+优先解析 `fclPlugin_V2`，从而获得可配置开关。v2 配置位于
+`fcl-plugin/src/main/res/values/strings.xml` 的 `renderer_config` 资源：
 
 ```json
 {
   "displayName": "GLES Mod",
   "rendererId": "glesmod",
-  "rendererGLPath": "libgl_gles.so",
+  "rendererGLPath": "**|libgl_gles.so",
   "rendererEGLPath": "libEGL.so",
-  "dlopenLibPaths": ["libgl_gles_core.so"],
   "env": [
+    { "type": "NormalEnv", "key": "POJAV_RENDERER", "value": "opengles3" },
     { "type": "NormalEnv", "key": "LIBGL_ES", "value": "3" },
     { "type": "NormalEnv", "key": "GLESMOD_ABI", "value": "1" },
-    { "type": "SelectableEnv", "key": "GLESMOD_DEGRADE_LEVEL",
-      "title": { "key": "glesmod_env_degrade_level" },
-      "items": { "defaultValue": "1", "values": ["0", "1", "2"] } },
-    { "type": "ToggleableEnv", "key": "GLESMOD_STATE_CACHE", "value": "1",
-      "title": { "key": "glesmod_env_state_cache" }, "toggle": true }
+    { "type": "NormalEnv", "key": "GLESMOD_ENABLE", "value": "1" },
+    { "type": "NormalEnv", "key": "GLESMOD_DEGRADE_LEVEL", "value": "1" },
+    { "type": "NormalEnv", "key": "GLESMOD_LOG_LEVEL", "value": "1" },
+    { "type": "NormalEnv", "key": "GLESMOD_TRACE", "value": "1" },
+    { "type": "NormalEnv", "key": "GLESMOD_SHADER_PROBE", "value": "0" },
+    { "type": "NormalEnv", "key": "GLESMOD_GEOM_PROBE", "value": "0" },
+    {
+      "type": "ToggleableEnv",
+      "key": "POJAVEXEC_EGL",
+      "value": "libEGL_angle.so",
+      "toggle": false,
+      "title": { "key": "gles_driver_angle" }
+    }
   ],
   "minMCVer": "1.21.1",
   "maxMCVer": "1.21.1"
 }
 ```
 
+v1 侧仍然提供 `renderer` / `des` / `boatEnv` / `pojavEnv` 等字段，用于旧版 FCL。
+其中 `pojavEnv` 必须包含 `POJAV_RENDERER=opengles3` 与 `LIBGL_ES=3`，原因见 §2.5。
+
 > ⚠️ **`LIBGL_ES=3` 是必需的**（O-09）：FCL 不会为插件渲染器自动设置该变量，而它决定 EGL 上下文版本（见 §2.5）。遗漏会导致上下文版本不可控。
 >
-> `rendererEGLPath` 填 `libEGL.so`（复用系统 EGL）。**本项目不接管 EGL**。
+> `rendererEGLPath` 填 `libEGL.so`（复用系统 EGL）。**默认不接管 EGL**；
+> 只有用户打开 v2 的 ANGLE 开关时，`ToggleableEnv` 才会把 `POJAVEXEC_EGL`
+> 覆盖为 `libEGL_angle.so`（见 §2.5「可选路径」）。
+>
+> ⚠️ `strings.xml` 里的 v2 JSON 必须用 `\"` 转义，不能写 `&quot;`：
+> aapt2 会把 `&quot;` 还原成引号后再剥掉，导致 FCL 的 `parseV2()` 静默失败。
+> 该约束由 `native/tools/check_plugin_v2.py` 与 `check_plugin_apk.py` 守护。
 
 **分层原则**：Java 层与 native 层之间**只有一个窄接口**（能力查询 + 事件上报 + 版本握手），不传递渲染调用。mod 形态与插件形态**共用同一份 native 核心**，差异仅在加载方式与配置界面。
 
@@ -296,10 +349,13 @@ Java 层**不参与高频渲染路径**，只做四件事：
 
 | 职责 | 说明 | 对应任务 |
 |---|---|---|
-| 能力探测 | 启动时调用 JNI 查询能力表，缓存结果，暴露为标准接口 | P1-02 / P2-01 |
-| 配置系统 | 读用户配置，决定降级档位与回退开关，下发给 native | P2-01 |
-| 兼容层联动 | 检测 Sodium / Embeddium 版本，调整其内部功能标志 | P2-02 / P2-03 |
-| 日志与上报 | 收集 native 上报的降级事件，输出玩家可读日志与统计数据 | P1-02 / P2-04 |
+| 能力上报 | 启动后读取 native 写出的 `glesmod/status.json`，缓存并暴露为标准接口 | P1-02 / P2-01 |
+| 配置系统 | 读用户配置；降级档位通过环境变量或配置文件传入 native | P2-01 |
+| 兼容层联动 | 检测 Sodium / Embeddium 版本，调整其功能标志 | P2-02 / P2-03 |
+| 日志与上报 | 读取 native 的降级事件，输出玩家可读日志与统计数据 | P1-02 / P2-04 |
+
+> **没有 JNI。** Java 与 native 的唯一边界是 `status.json` 文件（见 §7.1）。
+> 高频渲染路径完全不经过 Java。
 
 ### 4.1 启动时序
 
@@ -310,28 +366,29 @@ sequenceDiagram
     participant N as libgl_gles.so (本项目)
     participant M as Minecraft / LWJGL
     participant J as glesmod (Java)
-    participant G as libGLESv2.so
-    participant E as 现有 EGL
+    participant G as libGLESv2.so 或 ANGLE
 
     U->>L: 在「OpenGL 实现方式」中选择 GLES Mod
     L->>N: dlopen（按 rendererGLPath）
     N->>G: 加载并解析真实 ES 函数指针
     N->>N: 静态能力探测，填充能力表
-    L->>E: 按 rendererEGLPath 加载 EGL（不由本项目接管）
+    L->>G: 按 rendererEGLPath / POJAVEXEC_EGL 加载 EGL（默认不由本项目接管）
     L->>M: 启动游戏进程
     M->>J: NeoForge 加载模组
-    J->>N: 握手 + 查询能力表 (JNI)
+    J->>N: 读取 glesmod/status.json（无 JNI）
     N-->>J: 能力位 + 降级事件列表
-    J->>J: 读取配置，下发降级档位
+    J->>J: 读取配置，展示状态
     M->>N: 渲染调用（高频，纯 native 路径）
     N->>G: 转发为 GLES 3.2 调用
 ```
 
 **关键点**：
-- native 层在 `dlopen` 时即完成静态能力探测（此时 EGL 上下文尚未创建），在首次 `eglMakeCurrent` 后完成动态能力查询。Java 层查询的是已缓存结果，不做阻塞式 GL 调用。
-- **插件模式下 EGL 由 FCL 按 `rendererEGLPath` 自行加载**，本项目不介入。
+- native 层在 `dlopen` 时即完成静态能力探测（此时 EGL 上下文尚未创建），在首次 `eglMakeCurrent` 后完成动态能力查询；结果写入 `status.json`。
+- **插件模式下 EGL 默认由 FCL 按 `rendererEGLPath` 加载**，本项目不介入；只有用户打开 ANGLE 开关时，`POJAVEXEC_EGL` 才会被切到 `libEGL_angle.so`。
 
-> ✅ **O-08 已闭环**：FCL 使用的是系统 `libEGL.so`（厂商 EGL，直接对接 GLES 驱动），**非 ANGLE，无双重翻译风险**。详见 §2.5。
+> ✅ **默认路径无双重翻译**：FCL 使用系统 `libEGL.so`（厂商 EGL，直接对接 GLES 驱动）。
+>
+> ⚠️ **可选 ANGLE 模式是刻意的第二层翻译**：默认关闭、用户显式开启，链路见 §2.5。
 >
 > ⚠️ **但需注意**：插件渲染器不会自动设置 `LIBGL_ES`，必须在插件 env 中显式声明 `LIBGL_ES=3`（见 §2.5）。
 
@@ -390,19 +447,46 @@ typedef struct {
 
 防回归的关键工具。做法：
 
-1. 从 LWJGL 的 `liblwjgl.so` 导出表中提取所有 `gl*` / `egl*` 符号 → `expected.txt`
-2. 从本项目 `.so` 导出表中提取 → `provided.txt`
-3. 求差集，输出未覆盖符号清单与覆盖率百分比
-4. 对未覆盖符号，检查 GL4ES 是否提供；提供则可安全回退，否则标记为**阻塞风险**
+1. 以 `native/symbols.def` 为唯一真源（`F` 转发 / `C` 定制 / `S` 安全桩）
+2. 解析本项目 `.so` 的 ELF `.dynsym` 导出表 → 与声明集合求差
+3. 缺失任何符号即失败；额外导出只告警（例如历史遗留的 `glDrawPixels`）
 
 ```bash
-# native/tools/check_symbols.sh 的预期用法
-./check_symbols.sh build/liblwjgl.so build/libgl_gles.so
-# => 覆盖率: 812/834 (97.4%)
-# => 未覆盖: glGetnUniformfv, glMultiDrawElementsBaseVertex, ...
+python native/tools/check_symbols.py \
+  --lib build/native/arm64-v8a/libgl_gles.so \
+  --def native/symbols.def
+# => total 849 / exported 849 / missing 0
 ```
 
-此脚本的产出直接对应验收标准第 8 条。
+CI 对 arm64-v8a 与 armeabi-v7a 各跑一次；这是发布前必须通过的检查。
+
+### 5.4 proxy texture 仿真
+
+桌面 GL 有 `GL_PROXY_TEXTURE_*` 伪 target：`glTexImage2D` 用它做「这次分配会不会
+成功」的探测，再通过 `glGetTexLevelParameteriv` 读回结果。GLES 完全没有这套语义，
+Minecraft 1.21.1 的 `RenderSystem.maxSupportedTextureSize()` 恰好依赖它。
+
+native 层在 `custom.c` 里拦截四个入口：
+
+| 入口 | 行为 |
+|---|---|
+| `glTexImage2D` | 命中 proxy target 时只记录尺寸，不进入驱动 |
+| `glTexImage3D` | 命中 3D/array proxy 时安全拒绝，不进入驱动 |
+| `glGetTexLevelParameteriv` | 从本地 `g_proxy_state` 返回 width/height/internal format |
+| `glGetTexLevelParameterfv` | 同上，返回浮点 |
+
+仿真范围**刻意收窄**为已验证的 `GL_PROXY_TEXTURE_2D`、`GL_PROXY_TEXTURE_CUBE_MAP`、
+`GL_PROXY_TEXTURE_RECTANGLE`；其余 proxy target（1D / 3D / array / multisample）
+按「不可分配」返回 0，并记录一次：
+
+```text
+[GLESMod] proxy target 0x8C1B 未实现，按不可分配处理
+```
+
+这样既修掉了 ANGLE 2.1.1 在 `InvalidEnum` 上的空指针崩溃，又不会用未经证明的
+mip/depth 近似去污染其他 target。`GLESMOD_PROXY_EMU=0` 可退回旧行为，仅用于 A/B。
+实现细节与验证记录见 `docs/proxy-texture-fix-plan.md`、
+`docs/proxy-texture-hardening-plan.md`。
 
 ---
 

@@ -106,13 +106,15 @@ FCL 通过扫描已安装包的 `meta-data` 来发现渲染器插件（FCL 的
 `PluginManager.kt` / `RendererPlugin.kt`）。APK 只是承载这些元数据与 `.so`
 的**投递载体**。渲染时没有任何代码在 APK 内运行 —— 插件的 Activity 从不启动。
 
-清单是 **v1 格式**，其中若干字段之所以必需，只是因为 FCL 的解析器在字段缺失时
-会**静默 return**：
+清单以 **v1 字段为基线**，同时声明 **v2**（`fclPlugin_V2`）。旧版 FCL 只认识 v1；
+新版 FCL 优先解析 v2，从而获得「使用 ANGLE 作为 GLES 驱动」的开关。若干 v1 字段
+之所以必需，只是因为 FCL 的解析器在字段缺失时会**静默 return**：
 
 | 字段 | 存在理由 |
 |---|---|
 | `fclPlugin=true` | 发现阶段标记该包为插件 |
-| `renderer=GLES Mod:libgl_gles.so:libEGL.so` | 格式 `名称:GL:EGL`。我们提供 GL，**EGL 复用系统** |
+| `fclPlugin_V2=@string/renderer_config` | v2 配置入口；值是 `RendererConfigV2` JSON 的资源 ID |
+| `renderer=GLES Mod:libgl_gles.so:libEGL.so` | 格式 `名称:GL:EGL`。我们提供 GL，**EGL 默认复用系统** |
 | `des=…` | 显示名。必须是**字面量**而非 `@string/…` —— 资源引用会被 `PackageManager` 存成资源 ID，而 FCL 调用 `Bundle.getString()`，于是得到 null |
 | `boatEnv=…` | **必需但本项目不用。** FCL 的 `parseV1()` 执行 `getString("boatEnv") ?: return`，缺这一项会静默禁用整个插件 |
 | `pojavEnv=…` | 环境变量，格式 `KEY=VALUE:…` |
@@ -127,6 +129,40 @@ FCL 通过扫描已安装包的 `meta-data` 来发现渲染器插件（FCL 的
   进程在 `glfwInit()` 阶段 SIGSEGV。已真机验证。
 - **`LIBGL_ES=3`** —— 决定 EGL 上下文版本。FCL 只为内置渲染器自动设置，
   插件必须自己设，否则拿到 ES 2 上下文。
+
+### 3.2 ANGLE 开关链路
+
+v2 配置里只有一个与后端有关的 `ToggleableEnv`：
+
+```json
+{
+  "type": "ToggleableEnv",
+  "key": "POJAVEXEC_EGL",
+  "value": "libEGL_angle.so",
+  "toggle": false,
+  "title": { "key": "gles_driver_angle" }
+}
+```
+
+链路如下：
+
+1. 开关默认 `false`，插件不设置 `POJAVEXEC_EGL`，FCL 使用 `rendererEGLPath`
+   （`libEGL.so`）——**原生路径**。
+2. 用户打开开关后，FCL 注入 `POJAVEXEC_EGL=libEGL_angle.so`，`dlsym_EGL()`
+   加载 ANGLE 的 EGL。
+3. native 的 `get_gles_handle()` 按以下顺序选择兜底 GLES 库：
+   ```text
+   LIBGL_GLES（若显式设置）
+     > POJAVEXEC_EGL 含 "angle" -> libGLESv2_angle.so
+     > libGLESv2.so
+   ```
+   因此插件**绝不设置 `LIBGL_GLES`**；否则用户手动配置可能与开关冲突，
+   造成 EGL 与 GLES 不同源。
+4. 最终调用链变为 `libgl_gles.so → libGLESv2_angle.so → Vulkan`。
+
+> ⚠️ ANGLE 2.1.1 在 `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, ...)` 上会空指针
+> 崩溃；native 的 proxy texture 仿真（§4.2、§8.1）是该路径能启动的前提。
+> 开关默认关闭，ANGLE 初始化失败时也**没有自动回退**——关闭开关即可恢复原生路径。
 
 ---
 
@@ -168,9 +204,14 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  真实数量 + 1
 
 **`glTexImage2D/3D` + `glGetTexLevelParameteriv/fv`** 负责 proxy texture 仿真。
 桌面 GL 的 `GL_PROXY_TEXTURE_*` 在 GLES 中不存在，而 Minecraft 用它探测最大
-纹理尺寸。这两个入口在 proxy target 上直接读写本地 `g_proxy_state`，**不进入
-驱动**，从而避免 ANGLE 2.1.1 对 `InvalidEnum` 的空指针崩溃。详见
-`docs/proxy-texture-fix-plan.md`。
+纹理尺寸。命中 proxy target 时直接读写本地 `g_proxy_state`，**不进入驱动**，
+从而避免 ANGLE 2.1.1 对 `InvalidEnum` 的空指针崩溃。
+
+仿真**只完整覆盖** `GL_PROXY_TEXTURE_2D`、`GL_PROXY_TEXTURE_CUBE_MAP`、
+`GL_PROXY_TEXTURE_RECTANGLE`；其余 proxy target（1D / 3D / array / multisample）
+按「不可分配」返回 0，并记录一次日志。这样不会用未经证明的 mip/depth 近似
+去污染其他 target。详见 `docs/proxy-texture-fix-plan.md` 与
+`docs/proxy-texture-hardening-plan.md`。
 
 ### 4.3 `RESOLVE_OR_RETURN` 模式
 
@@ -416,7 +457,16 @@ FCL 插件环境变量  >  NeoForge 配置文件  >  自动探测  >  内置默�
 | `GLESMOD_GEOM_PROBE` | 0/1 | 几何诊断探针 |
 | `GLESMOD_PROXY_EMU` | 0/1 | 默认 1：proxy texture 仿真；0 退回旧行为（调试用） |
 | `GLESMOD_ABI` | 整数 | 期望的 ABI 版本 |
-| `POJAVEXEC_EGL` | 库名 | 由启动器设置；我们必须从**同一个实例**取 `eglGetProcAddress` |
+| `LIBGL_GLES` | 库名 | **可选**。显式指定兜底 GLES 库；设置后优先于 `POJAVEXEC_EGL` 推断。插件自身不设置它 |
+| `POJAVEXEC_EGL` | 库名 | 由启动器设置；我们必须从**同一个实例**取 `eglGetProcAddress`。v2 的 ANGLE 开关把它切到 `libEGL_angle.so` |
+
+> **同源规则**：native 只有在 `LIBGL_GLES` 未设置、且 `POJAVEXEC_EGL` 含
+> `angle` 时才会选择 `libGLESv2_angle.so`。因此正常使用 v2 开关不会错配；
+> 手动把 `LIBGL_GLES` 设成厂商库、同时打开 ANGLE 开关，才会制造
+> 「ANGLE EGL + 厂商 GLES」的错配。详见 §3.2。
+>
+> `GLESMOD_PROXY_EMU` 只影响 proxy texture 仿真开关；完整仿真范围固定为
+> 2D / cube / rectangle，其他 proxy target 始终安全返回 0。
 
 `GLESMOD_TRACE=1` 值得解释。全量序列追踪要在**每一次** GL 调用上付一次分支
 和一次原子自增；实测到达真实调用需要 29 条指令，而只追踪初始化阶段是 15 条。
@@ -603,20 +653,10 @@ Android NDK 27.x（Clang、CMake、Ninja、`glslc`）。
 
 记录下来，以免有人被过时文字误导：
 
-- **[`docs/architecture.md`](architecture.md) 已部分过时。**
-  它仍在描述 `native/src/entry_gl11.c`、`entry_gl20.c`、`entry_gl30.c`、
-  `caps.c`、`state.c`、`shader_conv.c`、`log.c` 以及 `check_symbols.sh`。
-  实际源码是 `core.c`、`custom.c`、`enum.c`、`generated_forwarders.c`、
-  `probe.c`、`shader.c`，工具链是 `native/tools/` 下的 Python 脚本。
-- **同一文档描述的是 JNI**，还提到 Java 侧的 `config/` 与 `capability/` 包。
-  本项目**没有 JNI**，边界是 `status.json`；也**没有 `config/` 包**
-  （`Config.java` 位于顶层）。
-- **它把 FCL 插件描述为 v2**（`fclPlugin_V2`、`strings.xml` 里的 JSON
-  `RendererConfigV2`）。实际交付的是 **v1**（`fclPlugin` + `renderer` +
-  `des` + `boatEnv` + `pojavEnv` 作为清单元数据）。
-  选 v1 是刻意的：`pojavEnv` 可以直接注入环境变量，`LIBGL_ES=3` 正是这样设的。
-- **它描述了 `capability-interface.md` 的 JNI 返回值契约**（§4）。
-  那一节因同样原因已过时。
+- **[`docs/capability-interface.md`](capability-interface.md) 仍描述 JNI 返回值契约**（§4）。
+  实际边界是 `glesmod/status.json`，没有 JNI；该节待重写。
+- **[`docs/architecture.md`](architecture.md) 已于 2026-11-07 同步**当前源码结构、
+  ANGLE 可选路径与 proxy texture 仿真；若仍有细节冲突，以本文与代码为准。
 
 以本文与代码为准；本文与 `architecture.md` 冲突时，以代码为准。
 

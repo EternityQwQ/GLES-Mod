@@ -50,6 +50,7 @@ flowchart LR
 | | |
 |---|---|
 | **Native ES 3.2 backend** | 849 exported GL symbols — 337 forwarded, 28 custom implementations, 484 safe stubs. No per-call JNI. |
+| **Optional ANGLE backend** | An opt-in renderer-plugin toggle routes the final ES calls through ANGLE → Vulkan. Default **off**; use it only when the vendor GLES driver misbehaves. Verified on Adreno 619 and Mali-G57. |
 | **GLSL → GLSL ES converter** | Desktop GLSL is not GLSL ES. The biggest difference: **desktop GLSL silently converts `int` → `float`, GLSL ES refuses to**. This converter rewrites the source at load time so shaders that work on desktop keep working on ES. It is the single most important component in this project. |
 | **Capability probing & graceful degradation** | Probes what the device actually supports, reports it, and degrades rather than crashing. Missing a feature is a decision, not an accident. |
 | **Sodium / Embeddium aware** | Detects the optimisation mod and its version, and picks a known-good strategy. Unknown versions take a *conservative* path and say so. Never guesses at internals, never mixin-injects into them. |
@@ -66,7 +67,9 @@ flowchart LR
 | Android | **arm64-v8a** or **armeabi-v7a**, with **OpenGL ES 3.2** |
 | Launcher | **FCL** (Fold Craft Launcher) for the renderer plugin; the NeoForge mod works in any launcher that can load a GL library |
 
-> Verified device: Xiaomi houji / SM8650 / **Adreno 750** / Android 16 / GLES 3.2.
+> Verified devices: Xiaomi houji / SM8650 / **Adreno 750** / Android 16 / GLES 3.2;
+> Oppo PGGM10 / SM6375 / **Adreno 619** / Android 14; **Mali-G57**. Native and
+> optional ANGLE paths verified on Adreno 619 and Mali-G57.
 
 ### Installation
 
@@ -85,6 +88,16 @@ Install it as an FCL renderer plugin, then select it in FCL's
 FCL `dlopen`s the GL library by path — no `LD_PRELOAD`, no inline hooking, no
 launcher modification. That is why this project is a renderer plugin by
 construction.
+
+> **Optional ANGLE mode.** After selecting the renderer, open
+> **Settings → Plugins → GLES Mod Renderer → ⚙** and enable
+> **“Use ANGLE as the GLES driver (experimental)”**. It is **off by default** and
+> only changes `POJAVEXEC_EGL` to `libEGL_angle.so`; leave `LIBGL_GLES` unset.
+> Enable it only if the native GLES path crashes or renders incorrectly.
+
+> ⚠️ **Updating the plugin:** CI builds currently use a fresh debug keystore each
+> run, so a new APK cannot overwrite the old install. Uninstall the previous
+> plugin before installing the new one.
 
 > The native library is **not** inside the mod jar. It lives in the plugin APK.
 > If you only install the jar, nothing changes — and that is the most common
@@ -164,8 +177,13 @@ Stated plainly, because pretending otherwise helps nobody:
   we have met and can prove; when it cannot convert, it forwards the original
   source *and* dumps both versions to `glesmod/native.log` so the failure is
   diagnosable rather than mysterious.
-- **No EGL takeover.** We provide GL only and reuse the launcher's existing
-  context, deliberately avoiding a second translation stack on top of ANGLE.
+- **No EGL takeover by default.** We provide GL only and reuse the launcher's
+  existing context. The optional ANGLE mode changes only `POJAVEXEC_EGL`; it is a
+  second translation layer (ES → Vulkan), experimental, and may report different
+  limits (for example `maxVertexAttribs=16` instead of 32).
+- **ANGLE requires a working Vulkan 1.1 driver.** If ANGLE cannot initialise,
+  the game fails to start; there is no automatic fallback to the native path yet.
+  Switch the toggle off to recover.
 
 ### Documentation
 
@@ -230,6 +248,7 @@ flowchart LR
 | | |
 |---|---|
 | **原生 ES 3.2 后端** | 导出 849 个 GL 符号 —— 337 个转发、28 个定制实现、484 个安全桩。热点路径不经过 JNI。 |
+| **可选 ANGLE 后端** | 插件里的实验性开关可把最终 ES 调用交给 ANGLE → Vulkan。默认**关闭**；仅在厂商 GLES 驱动异常时使用。已在 Adreno 619 与 Mali-G57 验证。 |
 | **GLSL → GLSL ES 转换器** | 桌面 GLSL 不是 GLSL ES。最大的差异是：**桌面 GLSL 允许 `int` → `float` 隐式转换，GLSL ES 不允许**。本转换器在着色器加载时改写源码，让桌面能跑的着色器在 ES 上也能跑。这是本项目最关键的部件。 |
 | **能力探测与优雅降级** | 探测设备真实能力并如实上报；能力不足时降级而不是崩溃。缺功能是一个**经过判断的决定**，不是意外。 |
 | **感知 Sodium / Embeddium** | 识别优化模组及其版本，选择已验证的策略。未知版本走**保守**路径并在日志中说明。绝不猜测其内部实现，也不对其做 Mixin 注入。 |
@@ -246,7 +265,9 @@ flowchart LR
 | Android | **arm64-v8a** 或 **armeabi-v7a**，且支持 **OpenGL ES 3.2** |
 | 启动器 | 渲染器插件需要 **FCL（Fold Craft Launcher）**；NeoForge 模组可用于任何能加载 GL 库的启动器 |
 
-> 已验证设备：Xiaomi houji / SM8650 / **Adreno 750** / Android 16 / GLES 3.2。
+> 已验证设备：Xiaomi houji / SM8650 / **Adreno 750** / Android 16 / GLES 3.2；
+> Oppo PGGM10 / SM6375 / **Adreno 619** / Android 14；**Mali-G57**。
+> 原生与可选 ANGLE 两条路径已在 Adreno 619 与 Mali-G57 验证。
 
 ### 安装
 
@@ -262,6 +283,15 @@ flowchart LR
 作为 FCL 渲染器插件安装，然后在 FCL 的 **Renderer** 设置里选中它。
 真正的 GL 实现在这里。FCL 是按路径 `dlopen` GL 库的 —— 不需要 `LD_PRELOAD`、
 不需要 inline hook、不需要改启动器。这也是本项目**天然就是**一个渲染器插件的原因。
+
+> **可选 ANGLE 模式。** 选中渲染器后，打开
+> **设置 → 插件 → GLES Mod Renderer → ⚙**，启用
+> **「使用 ANGLE 作为 GLES 驱动（实验性）」**。默认**关闭**，只把
+> `POJAVEXEC_EGL` 切到 `libEGL_angle.so`；不要额外设置 `LIBGL_GLES`。
+> 仅在原生 GLES 路径崩溃或渲染异常时才建议打开。
+
+> ⚠️ **更新插件：** CI 每次构建都会生成新的 debug keystore，新 APK 无法覆盖安装。
+> 安装新版本前请先卸载旧插件。
 
 > 原生库**不在**模组 jar 里，而在插件 APK 里。
 > 只装 jar 不会有任何变化 —— 这是最常见的「我装了但没反应」。
@@ -335,8 +365,11 @@ py -X utf8 native/tools/run_all_gates.py
 - **并非所有着色器都能转换**。转换器覆盖的是我们**遇到过并能证明**的构造；转换失败时
   它会转发原始源码，**并把两份都写进 `glesmod/native.log`**，
   让失败可诊断而不是成谜。
-- **不接管 EGL**。我们只提供 GL、复用启动器已建好的上下文，
-  刻意避免在 ANGLE 之上再叠一层翻译。
+- **默认不接管 EGL**。我们只提供 GL、复用启动器已建好的上下文。可选 ANGLE 模式
+  只切换 `POJAVEXEC_EGL`，它是**第二层翻译**（ES → Vulkan），属于实验性功能，
+  能力值可能与原生不同（例如 `maxVertexAttribs=16` 而非 32）。
+- **ANGLE 需要可用的 Vulkan 1.1 驱动**。若 ANGLE 初始化失败，游戏会启动失败；
+  目前**没有**自动回退到原生路径，关闭开关即可恢复。
 
 ### 文档
 

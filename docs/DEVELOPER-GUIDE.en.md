@@ -117,13 +117,16 @@ package is simply the delivery mechanism for those metadata entries and the
 `.so` files. There is no code that runs inside the APK at render time; the
 plugin's Activity never launches.
 
-The manifest is **v1 format**, and several fields are required only because
-FCL's parser returns early (silently) if any is missing:
+The manifest uses **v1 fields as the baseline** and also declares **v2**
+(`fclPlugin_V2`). Old FCL only understands v1; new FCL prefers v2 and therefore
+gets the “Use ANGLE as the GLES driver” toggle. Several v1 fields are required
+only because FCL's parser returns early (silently) if any is missing:
 
 | Field | Why it exists |
 |---|---|
 | `fclPlugin=true` | Marks the package as a plugin during discovery |
-| `renderer=GLES Mod:libgl_gles.so:libEGL.so` | `name:GL:EGL`. We supply GL; **EGL is reused** |
+| `fclPlugin_V2=@string/renderer_config` | v2 entry point; its value is the resource ID of the `RendererConfigV2` JSON |
+| `renderer=GLES Mod:libgl_gles.so:libEGL.so` | `name:GL:EGL`. We supply GL; **EGL is reused by default** |
 | `des=…` | Display name. Must be a literal, not `@string/…` — `PackageManager` stores a resource ID for resource references, and FCL calls `Bundle.getString()`, which then yields null |
 | `boatEnv=…` | **Required but unused.** FCL's `parseV1()` does `getString("boatEnv") ?: return`, so a missing key silently disables the whole plugin |
 | `pojavEnv=…` | Environment variables, `KEY=VALUE:…` |
@@ -138,6 +141,41 @@ Two environment variables are non-negotiable, both learned from crashes:
   returns NULL, and the process SIGSEGVs during `glfwInit()`. Verified on device.
 - **`LIBGL_ES=3`** — decides the EGL context version. FCL sets it automatically
   only for built-in renderers, so a plugin must set it or get an ES 2 context.
+
+### 3.2 The ANGLE toggle chain
+
+v2 declares exactly one backend-related `ToggleableEnv`:
+
+```json
+{
+  "type": "ToggleableEnv",
+  "key": "POJAVEXEC_EGL",
+  "value": "libEGL_angle.so",
+  "toggle": false,
+  "title": { "key": "gles_driver_angle" }
+}
+```
+
+The chain is:
+
+1. The toggle defaults to `false`. The plugin does not set `POJAVEXEC_EGL`, so FCL
+   uses `rendererEGLPath` (`libEGL.so`) — the **native path**.
+2. When enabled, FCL injects `POJAVEXEC_EGL=libEGL_angle.so` and `dlsym_EGL()`
+   loads ANGLE's EGL.
+3. Native `get_gles_handle()` picks the fallback GLES library in this order:
+   ```text
+   LIBGL_GLES (if explicitly set)
+     > POJAVEXEC_EGL contains "angle" -> libGLESv2_angle.so
+     > libGLESv2.so
+   ```
+   The plugin therefore **never sets `LIBGL_GLES`**; a user-supplied value could
+   conflict with the toggle and leave EGL and GLES from different implementations.
+4. The final chain becomes `libgl_gles.so → libGLESv2_angle.so → Vulkan`.
+
+> ⚠️ ANGLE 2.1.1 null-dereferences on `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, ...)`;
+> the native proxy-texture emulation (§4.2, §8.1) is what makes this path start.
+> The toggle is off by default, and there is **no automatic fallback** if ANGLE
+> fails to initialise — turn the toggle off to return to the native path.
 
 ---
 
@@ -181,10 +219,16 @@ diagnosed — see §10.
 
 **`glTexImage2D/3D` + `glGetTexLevelParameteriv/fv`** implement proxy-texture
 emulation. Desktop GL's `GL_PROXY_TEXTURE_*` does not exist in GLES, but
-Minecraft uses it to probe the maximum texture size. These entry points read and
-write the local `g_proxy_state` for proxy targets and **never enter the driver**,
-avoiding the ANGLE 2.1.1 null dereference on `InvalidEnum`. See
-`docs/proxy-texture-fix-plan.md`.
+Minecraft uses it to probe the maximum texture size. For proxy targets these
+entry points read and write the local `g_proxy_state` and **never enter the
+driver**, avoiding the ANGLE 2.1.1 null dereference on `InvalidEnum`.
+
+Emulation **fully covers only** `GL_PROXY_TEXTURE_2D`,
+`GL_PROXY_TEXTURE_CUBE_MAP` and `GL_PROXY_TEXTURE_RECTANGLE`. Every other proxy
+target (1D / 3D / array / multisample) is treated as non-allocatable: it returns
+0 and logs once. This avoids polluting other targets with an unproven mip/depth
+approximation. See `docs/proxy-texture-fix-plan.md` and
+`docs/proxy-texture-hardening-plan.md`.
 
 ### 4.3 The `RESOLVE_OR_RETURN` pattern
 
@@ -459,7 +503,16 @@ outside the game.
 | `GLESMOD_GEOM_PROBE` | 0/1 | Geometry diagnostic probe |
 | `GLESMOD_PROXY_EMU` | 0/1 | Default 1: proxy-texture emulation; 0 disables it (debug only) |
 | `GLESMOD_ABI` | int | Expected ABI version |
-| `POJAVEXEC_EGL` | lib name | Set by the launcher; the EGL instance we must take `eglGetProcAddress` from |
+| `LIBGL_GLES` | lib name | **Optional.** Explicit fallback GLES library; when set it takes precedence over the `POJAVEXEC_EGL` inference. The plugin never sets it |
+| `POJAVEXEC_EGL` | lib name | Set by the launcher; the EGL instance we must take `eglGetProcAddress` from. The v2 ANGLE toggle switches it to `libEGL_angle.so` |
+
+> **Same-origin rule:** native selects `libGLESv2_angle.so` only when
+> `LIBGL_GLES` is unset and `POJAVEXEC_EGL` contains `angle`. Using the v2 toggle
+> normally cannot mismatch; setting `LIBGL_GLES` to a vendor library *and*
+> enabling ANGLE is what creates “ANGLE EGL + vendor GLES”. See §3.2.
+>
+> `GLESMOD_PROXY_EMU` only toggles proxy-texture emulation. The emulated set is
+> fixed to 2D / cube / rectangle; every other proxy target always returns 0.
 
 `GLESMOD_TRACE=1` deserves explanation. Full-sequence tracing costs a branch and
 an atomic increment on **every** GL call; measured, that is 29 instructions to
@@ -656,22 +709,12 @@ requires an ABI bump.
 
 Recorded so nobody is misled by stale text:
 
-- **[`docs/architecture.md`](architecture.md) is partially out of date.**
-  It still describes `native/src/entry_gl11.c`, `entry_gl20.c`,
-  `entry_gl30.c`, `caps.c`, `state.c`, `shader_conv.c`, `log.c`, and a
-  `check_symbols.sh`. The actual sources are `core.c`, `custom.c`, `enum.c`,
-  `generated_forwarders.c`, `probe.c`, `shader.c`, with a Python toolchain under
-  `native/tools/`.
-- **The same document describes JNI**, plus `config/` and `capability/` Java
-  packages. There is no JNI; the boundary is `status.json`. There is no
-  `config/` package (`Config.java` is top-level).
-- **It describes the FCL plugin as v2** (`fclPlugin_V2`, a JSON
-  `RendererConfigV2` in `strings.xml`). The shipped plugin is **v1**
-  (`fclPlugin` + `renderer` + `des` + `boatEnv` + `pojavEnv` as manifest
-  metadata). The v1 choice is deliberate: `pojavEnv` injects environment
-  variables directly, which is how `LIBGL_ES=3` is set.
-- **It describes a `capability-interface.md` JNI return-value contract**
-  (§4). That section is obsolete for the same reason.
+- **[`docs/capability-interface.md`](capability-interface.md) still describes a JNI
+  return-value contract** (§4). The real boundary is `glesmod/status.json`;
+  there is no JNI. That section is pending a rewrite.
+- **[`docs/architecture.md`](architecture.md) was synchronised on 2026-11-07**
+  with the current sources, the optional ANGLE path, and proxy-texture
+  emulation. If any detail still conflicts, this document and the code win.
 
 This document and the code are the authority; where they disagree with
 `architecture.md`, the code wins.

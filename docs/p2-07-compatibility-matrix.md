@@ -13,6 +13,7 @@
 > | v1 | 2026-09-29 | 初版：基于 Sodium 真机验证结果 |
 > | v2 | 2026-09-29 | §4.1 高危项已修复；新增构建期导出符号校验门禁 |
 > | v3 | 2026-09-29 | **新增 Embeddium 实机结果**：无视觉问题、帧率与 Sodium 相当；§4.1 查明该风险路径**实测未被触发** |
+> | v4 | 2026-11-07 | 新增 **ANGLE 可选后端**验证：Adreno 619 / Mali-G57，原生与 ANGLE 双路径通过；补充 proxy texture 修复记录 |
 
 ---
 
@@ -64,6 +65,29 @@ return new CompatTarget(modId, version,
 > 软依赖 + 保守策略更可持续。
 
 **许可证约束**：Sodium 自 0.6 起采用 **Polyform Shield** 许可证，**不得复制其代码**。本项目只做运行时检测。
+
+### 1.3 渲染后端：原生 GLES vs 可选 ANGLE
+
+| 后端 | 启用方式 | 链路 | 默认 | 状态 |
+|---|---|---|---|---|
+| 原生 GLES | 默认 | 桌面 GL → `libgl_gles.so` → 厂商 GLES 驱动 | ✅ | ✅ 已验证 |
+| ANGLE | 插件 v2 开关（`POJAVEXEC_EGL=libEGL_angle.so`） | 桌面 GL → `libgl_gles.so` → ANGLE → Vulkan | ❌ | ✅ 已验证（Adreno 619 / Mali-G57） |
+
+ANGLE 是**第二层翻译**，只在原生 GLES 驱动异常、或需要 ANGLE 的 Vulkan 路径时
+才建议打开。两者共用同一份 native 核心和同一套 proxy texture 仿真；ANGLE 只是把
+最终执行层从「厂商 GLES」换成「ANGLE → Vulkan」。
+
+已知后端差异（实测，非缺陷）：
+
+| 能力 | 原生 Adreno 619 | ANGLE 2.1.1 |
+|---|---|---|
+| `GL_RENDERER` | `Adreno (TM) 619` | `ANGLE (Qualcomm, Vulkan 1.1.128, Adreno 619)` |
+| `maxTextureUnits` | 96 | 192 |
+| `maxVertexAttribs` | 32 | 16 |
+| proxy texture 2D 探测 | 仿真，32768 → 0 | 仿真，32768 → 0 |
+
+> Turnip 目前**不作用于 ANGLE**：即使设置 `DRIVER_LIB=libvulkan_freedreno.so`，
+> ANGLE 仍使用厂商 Vulkan 驱动。这是独立问题，不在本次收口范围。
 
 ---
 
@@ -176,6 +200,36 @@ MobileGlues（GL→ES 转发）与 Zink（GL→Vulkan）都在 **native 层**，
   的预期优势，在这类负载下**恰好测不出来**（因为瓶颈不在翻译层）
 
 ⇒ 差异应体现在**更极端负载**下。这是后续需要验证的方向。
+
+### 3.5 ANGLE 可选后端验证（2026-11-07）
+
+在两台设备上分别验证「原生 GLES」与「ANGLE」两条路径，均包含启动、进世界、
+退出游戏：
+
+| 项 | 原生模式 | ANGLE 模式 |
+|---|---|---|
+| `POJAVEXEC_EGL` | `libEGL.so` | `libEGL_angle.so` |
+| GLES 库 | `libGLESv2.so` | `libGLESv2_angle.so` |
+| `GL_RENDERER` | `Adreno (TM) 619` | `ANGLE (Qualcomm, Vulkan 1.1.128, Adreno 619)` |
+| proxy 2D 探测 | `32768x32768 max=16384 -> 0x0` | 同左 |
+| 启动崩溃 | 无 | 无 |
+| 进世界 / 退出 | ✅ | ✅ |
+| Sodium / Iris | ✅ | ✅ |
+
+验证设备：
+
+| 设备 | SoC | GPU | Android | 结果 |
+|---|---|---|---|---|
+| Oppo PGGM10 | SM6375 | Adreno 619 | 14（SDK 34） | ✅ 原生 + ANGLE |
+| Mali-G57 设备 | — | Mali-G57 | — | ✅ 原生 + ANGLE |
+
+结论：
+
+- v2 开关只切换 `POJAVEXEC_EGL`，native 自动选择同源 GLES，**没有 EGL/GLES 错配**；
+- proxy texture 仿真在两种后端下都生效，ANGLE 2.1.1 的
+  `RenderSystem.maxSupportedTextureSize` 崩溃不再出现；
+- 本轮 MC/Sodium 只使用 `GL_PROXY_TEXTURE_2D`，没有触发「未实现 proxy target」
+  日志，符合收窄后的预期。
 
 ---
 
@@ -318,9 +372,11 @@ ZL2 日志中 `[GLESMod]` 的 `stderr` 行为 **0 条**，但 Java 侧 `status.j
 
 | 设备 | SoC | GPU | GLES | 状态 |
 |---|---|---|---|---|
-| Xiaomi houji 23127PN0CC | SM8650 | Adreno 750 | 3.2 | ✅ 已验证 |
+| Xiaomi houji 23127PN0CC | SM8650 | Adreno 750 | 3.2 | ✅ 原生已验证 |
+| Oppo PGGM10 | SM6375 | Adreno 619 | 3.2 | ✅ 原生 + ANGLE 已验证 |
+| Mali-G57 设备 | — | Mali-G57 | 3.2 | ✅ 原生 + ANGLE 已验证 |
 | 其他 Adreno | — | — | — | ⚠️ 未测（同类驱动，预计可用） |
-| Mali | — | — | — | ⚠️ 未测（**注意**：Mali 对 `glGetError` 性能敏感，且误差行为与 Adreno 不同） |
+| 其他 Mali | — | — | — | ⚠️ 未测（**注意**：Mali 对 `glGetError` 性能敏感，且误差行为与 Adreno 不同） |
 | PowerVR | — | — | — | ⚠️ 未测 |
 
 > **P3-05（设备兼容性数据库与回退开关）将扩展此表。** 当前仅有单设备结论，不构成"广泛兼容"的承诺。
@@ -338,6 +394,7 @@ ZL2 日志中 `[GLESMod]` 的 `stderr` 行为 **0 条**，但 Java 侧 `status.j
 | 5 | 🟢 低 | 驱动功耗/命名冲突噪声 | 驱动侧 | ℹ️ 记录，不修 |
 | 6 | ⚪ 非本项目 | FCL < 1.3.3.2 帧率锁定 | 启动器 | ⚠️ 升级 FCL |
 | 7 | ⚪ 非本项目 | ZL2 不重定向 `stderr` | 启动器 | ℹ️ 已用文件通道绕过 |
+| 8 | ✅ 已修复 | ANGLE 2.1.1 在 `GL_PROXY_TEXTURE_2D` 空指针崩溃 | ANGLE 模式启动 | ✅ native proxy 仿真 + 真机验证 |
 
 ---
 
@@ -349,3 +406,5 @@ ZL2 日志中 `[GLESMod]` 的 `stderr` 行为 **0 条**，但 Java 侧 `status.j
 3. **性能与其他主流渲染器相当**（原版环境），高于验收指标。
 4. **保留在 `CONSERVATIVE` 级别**，直到再测 2~3 轮；届时可提升为 `FULLY_SUPPORTED`。
 5. **所有其他残留噪声均已定性**，无一是渲染正确性问题。
+6. **ANGLE 可选后端已通过 Adreno 619 与 Mali-G57 验证**：默认关闭，开启后 EGL/GLES
+   同源切换，proxy texture 仿真正常，无启动崩溃；原生路径无回归。

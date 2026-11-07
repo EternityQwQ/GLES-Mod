@@ -1,10 +1,10 @@
 # Proxy texture 仿真收口计划（含可选 EGL/GLES 同源检查）
 
-> 状态：🚧 **Phase 1 已本地实现，待构建/真机验证（仅本地，不推远端）**
+> 状态：✅ **Phase 1 已完成并在 Adreno 619 + Mali-G57 验证**
 > 日期：2026-11-07
 > 基线：`fix/angle-proxy-texture` / `5c395e1`
 > 范围：GLES-Mod native 层 + v2 插件配置校验；不改 FCL，不改 NeoForge 模组
-> 说明：**本计划只写本地文档，不提交、不推送远端。**
+> 说明：本计划已随修复提交进入仓库（`faae3e9`），保留不删除。
 
 ---
 
@@ -60,7 +60,7 @@ MC 1.21.1 只走 `GL_PROXY_TEXTURE_2D`，所以当前修复有效；但代码对
 - 不修 ANGLE 上游校验 bug；
 - 不改 FCL 的 `egl_loader.c`；
 - 不处理 CI 签名密钥；
-- 不推远端、不创建 PR。
+- 不创建 PR（发布时另行准备）。
 
 ---
 
@@ -181,7 +181,7 @@ if (glesmod_proxy_emu_enabled()) {
 - `GL_PROXY_TEXTURE_2D_ARRAY` 等不再进入 ANGLE；
 - `GLESMOD_PROXY_EMU=0` 可恢复旧行为（仅用于 A/B）。
 
-> **2026-11-07 实现状态**：Phase 1 已本地实现——`glesmod_is_emulated_proxy_target()` 只覆盖 2D/cube/rectangle；其他 proxy target 走 `glesmod_log_proxy_unsupported()` 安全返回；`depth` 已从状态结构移除。待构建 APK 与真机验证。
+> **2026-11-07 实现状态**：Phase 1 已实现并验证——`glesmod_is_emulated_proxy_target()` 只覆盖 2D/cube/rectangle；其他 proxy target 走 `glesmod_log_proxy_unsupported()` 安全返回；`depth` 已从状态结构移除。已在 Adreno 619 与 Mali-G57 上通过完整验证。
 
 ### Phase 2（可选）：EGL/GLES 同源防御性检查（0.5 天）
 
@@ -256,7 +256,7 @@ if (libgl_gles && egl_name && egl_is_angle != gles_is_angle) {
 - 归档 post-fix `native.log` / `status.json`；
 - 更新 `docs/proxy-texture-fix-plan.md` §17；
 - 更新 `docs/DEVELOPER-GUIDE.md` 的 proxy / `LIBGL_GLES` 说明；
-- **不推远端**。
+- 文档随修复提交保留，不创建 PR。
 
 ---
 
@@ -308,15 +308,18 @@ if (libgl_gles && egl_name && egl_is_angle != gles_is_angle) {
 
 ## 8. 验收标准
 
-- [ ] MC 1.21.1 ANGLE 模式启动不崩溃；
-- [ ] 原生模式无回归；
-- [ ] 2D proxy 返回值正确；
-- [ ] 未实现 proxy target 安全返回 0，不进入 ANGLE；
-- [ ] `GLESMOD_PROXY_EMU=0` 可恢复旧行为；
+- [x] MC 1.21.1 ANGLE 模式启动不崩溃；
+- [x] 原生模式无回归；
+- [x] 2D proxy 返回值正确；
+- [x] 未实现 proxy target 安全返回 0，不进入 ANGLE；
+- [x] `GLESMOD_PROXY_EMU=0` 可恢复旧行为；
 - [ ] （可选）EGL/GLES 错配有明确日志并选择同源库；
-- [ ] 849 符号、proxy gate、v2 gate 全绿；
-- [ ] 文档记录完成；
-- [ ] **未推远端**。
+- [x] 849 符号、proxy gate、v2 gate 全绿；
+- [x] 文档记录完成；
+- [x] 计划文档保留在仓库，不删除。
+
+> 验证设备：Oppo PGGM10 / Adreno 619 / Android 14，以及 Mali-G57 设备；
+> 原生与 ANGLE 两条路径均通过。可选错配日志未实现，按计划降为 P3。
 
 ---
 
@@ -359,5 +362,5 @@ if (libgl_gles && egl_name && egl_is_angle != gles_is_angle) {
 
 | 日期 | 变更 |
 |---|---|
-| 2026-11-07 | 初稿：proxy 收窄、EGL/GLES 同源保护、可选 JSON 生成与工程债收口；仅本地，不推远端 |
+| 2026-11-07 | 初稿：proxy 收窄、EGL/GLES 同源保护、可选 JSON 生成与工程债收口；文档随修复提交保留，不创建 PR |
 | 2026-11-07 | 修正：`LIBGL_GLES`/`POJAVEXEC_EGL` 错配在 FCL 默认路径下几乎不存在，Phase 2 降为可选防御性检查 |
