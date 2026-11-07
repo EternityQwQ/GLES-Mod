@@ -24,6 +24,7 @@
 | `iris_layout_out.frag` | `layout(location=N) out` 输出声明 |
 | `sodium_blit_bitwise.vert` | `gl_VertexID & 1` 的整数位运算被误转为浮点 |
 | `veil_pow_int_exponent.vert` | `pow(vecN, int)` —— 向量底数 + 整数指数无重载 |
+| `error_directive_quotes.vert` | 非活动 `#else` 分支中的 `#error "..."`；Mali 词法器拒绝引号 |
 
 **授权**：LGPL-3.0-or-later（同本项目）。
 
@@ -105,4 +106,4 @@
 
 ---
 
-*最后更新：2026-10-03*
+*最后更新：2026-11-07*

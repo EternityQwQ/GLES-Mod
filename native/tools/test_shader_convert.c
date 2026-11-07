@@ -1942,6 +1942,61 @@ int main(void) {
         }
     }
 
+    /* ---------------- 用例：预处理器 #error 消息 ---------------- */
+    printf("\n[23] 预处理器：#error 的桌面字符串消息\n");
+    {
+        /*
+         * 真机证据（Mali-G57，Sodium 0.8.13 + Iris 1.8.14）：
+         *     Shader compilation log for sodium:blocks/block_layer_opaque.vsh:
+         *     2:65: L0001: Unknown character '"'(34)
+         *
+         * 引号来自 chunk_vertex.glsl 的非活动 #else 分支：
+         *     #error "Vertex compression must be enabled"
+         * Mali 的词法器仍会扫描它。GLSL ES 没有字符串字面量，
+         * 因此转换器必须把消息规范化为合法 token。
+         */
+        static const char *ERROR_DIRECTIVE_CASE =
+            "#version 330 core\n"
+            "#define USE_VERTEX_COMPRESSION\n"
+            "#ifdef USE_VERTEX_COMPRESSION\n"
+            "void main() { gl_Position = vec4(0.0); }\n"
+            "#else\n"
+            "#error \"Vertex compression must be enabled\"\n"
+            "#endif\n";
+        int l23 = 0;
+        char *o23 = glesmod_convert_shader_source(ERROR_DIRECTIVE_CASE, &l23,
+                                                  STAGE_VERTEX);
+        check(o23 != NULL, "#error 场景：转换返回非 NULL");
+        if (o23 != NULL) {
+            check(strstr(o23, "#error \"") == NULL,
+                  "#error 消息不再包含双引号（Mali L0001 的根因）");
+            check(strstr(o23, "#error Vertex compression must be enabled")
+                      != NULL,
+                  "#error 消息被规范化为合法 token 序列");
+            check(strstr(o23, "#error Vertex compression must be enabled\n#endif")
+                      != NULL,
+                  "#error 规范化保持单行，未改变 #endif 的行位置");
+            free(o23);
+        }
+
+        /* 活动分支也必须保留 #error，不能被静默删除 */
+        static const char *ERROR_ACTIVE_CASE =
+            "#version 330 core\n"
+            "#error \"unsupported path\"\n"
+            "void main() { gl_Position = vec4(0.0); }\n";
+        int l24 = 0;
+        char *o24 = glesmod_convert_shader_source(ERROR_ACTIVE_CASE, &l24,
+                                                  STAGE_VERTEX);
+        check(o24 != NULL, "#error 活动分支：转换返回非 NULL");
+        if (o24 != NULL) {
+            check(strstr(o24, "#error unsupported path") != NULL,
+                  "#error 活动分支仍保留指令（不会被静默删除）");
+            check(strstr(o24, "#error \"") == NULL,
+                  "活动分支的 #error 消息同样不含引号");
+            free(o24);
+        }
+    }
+
     printf("\n=== 结果: %s（失败 %d 项）===\n",
            failures == 0 ? "全部通过" : "存在失败", failures);
     return failures == 0 ? 0 : 1;

@@ -14,6 +14,7 @@
 > | v2 | 2026-09-29 | §4.1 高危项已修复；新增构建期导出符号校验门禁 |
 > | v3 | 2026-09-29 | **新增 Embeddium 实机结果**：无视觉问题、帧率与 Sodium 相当；§4.1 查明该风险路径**实测未被触发** |
 > | v4 | 2026-11-07 | 新增 **ANGLE 可选后端**验证：Adreno 619 / Mali-G57，原生与 ANGLE 双路径通过；补充 proxy texture 修复记录 |
+> | v5 | 2026-11-07 | 新增 Mali `#error "..."` 词法错误修复记录（Sodium + Iris 进世界崩溃的根因） |
 
 ---
 
@@ -339,6 +340,36 @@ Embeddium 的 `MappedStagingBuffer` 依赖它**真实分配存储**，否则后�
 
 **教训**：改完代码后，**必须确认设备上跑的确实是新构建**，否则会浪费时间排查已修好的问题。
 
+### 4.7 ✅ 已修复：Mali 拒绝 `#error "..."` 的字符串消息
+
+**现象**：Mali-G57 进入世界时崩溃，栈在 Sodium `GlShader.<init>`：
+
+```text
+Shader compilation log for sodium:blocks/block_layer_opaque.vsh:
+2:65: L0001: Unknown character '"'(34)
+```
+
+**根因**：Sodium 的 `chunk_vertex.glsl` 在非活动 `#else` 分支里有：
+
+```glsl
+#error "Vertex compression must be enabled"
+```
+
+GLSL ES 没有字符串字面量。Mali 的词法器即使在非活动分支里也会扫描到引号，
+于是 `"` 被报为未知字符。Adreno 能容忍，所以此前未暴露。
+
+**修复**：转换器的 `normalize_preprocessor_directives()` 现在把 `#error`
+消息规范化为合法 token，同时保留指令与行号：
+
+```glsl
+#error Vertex compression must be enabled
+```
+
+**验证**：主机端用例 `[23]`、A/B 开关 `GLESMOD_NO_ERROR_DIRECTIVE_FIX`、
+标记字符串 `GLESMOD_ERROR_DIRECTIVE_NORMALIZED`；已用真机日志中的 163 行原始
+着色器离线回放，输出为 `#error Vertex compression must be enabled`（无引号）；
+Mali 真机待装新 APK 复测。
+
 ---
 
 ## 5. 与启动器相关的已知事项（非本项目缺陷）
@@ -395,6 +426,7 @@ ZL2 日志中 `[GLESMod]` 的 `stderr` 行为 **0 条**，但 Java 侧 `status.j
 | 6 | ⚪ 非本项目 | FCL < 1.3.3.2 帧率锁定 | 启动器 | ⚠️ 升级 FCL |
 | 7 | ⚪ 非本项目 | ZL2 不重定向 `stderr` | 启动器 | ℹ️ 已用文件通道绕过 |
 | 8 | ✅ 已修复 | ANGLE 2.1.1 在 `GL_PROXY_TEXTURE_2D` 空指针崩溃 | ANGLE 模式启动 | ✅ native proxy 仿真 + 真机验证 |
+| 9 | ✅ 已修复 | Mali 拒绝 `#error "..."` 字符串（L0001） | Mali + Sodium/Iris 进世界 | ✅ 转换器规范化 + 主机用例 |
 
 ---
 

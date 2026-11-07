@@ -476,14 +476,70 @@ static void expand_int_const_macros(sbuf *out, const char *src) {
     }
 }
 
-static void strip_desktop_extensions(sbuf *out, const char *src) {
+/*
+ * 把 #error 的消息规范化为 GLSL ES 合法的 token 序列。
+ *
+ * 桌面 GLSL 习惯写成：
+ *     #error "Vertex compression must be enabled"
+ * 但 GLSL ES 的预处理器没有字符串字面量。Mali 的词法器即使在
+ * 非活动分支里也会扫描到引号：
+ *     2:65: L0001: Unknown character '"'(34)
+ * 于是整个着色器编译失败（Sodium + Iris 进入世界时必现）。
+ *
+ * 这里只保留标识符字符与单空格：消息仍然可读，指令本身不变，
+ * 活动分支依旧会按原意触发 #error。
+ */
+#ifndef GLESMOD_NO_ERROR_DIRECTIVE_FIX
+static void emit_error_message_tokens(sbuf *out, const char *msg, size_t n) {
+    int emitted = 0;
+    int pending_space = 0;
+
+    for (size_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)msg[i];
+        int keep = (c >= 'A' && c <= 'Z') ||
+                   (c >= 'a' && c <= 'z') ||
+                   (c >= '0' && c <= '9') ||
+                   c == '_';
+        if (keep) {
+            char ch = (char)c;
+            if (pending_space && emitted) sbuf_put(out, " ", 1);
+            sbuf_put(out, &ch, 1);
+            emitted = 1;
+            pending_space = 0;
+        } else {
+            pending_space = 1;
+        }
+    }
+}
+#endif  /* GLESMOD_NO_ERROR_DIRECTIVE_FIX */
+
+/*
+ * 预处理器指令规范化。
+ *
+ * 桌面 GLSL 与 GLSL ES 的预处理器并不完全等价。这里只处理两类
+ * 已知差异，且都保持「行数不变」，以免破坏 #line 映射：
+ *
+ *   1. 桌面专属 #extension（例如 GL_ARB_separate_shader_objects）
+ *      -> 注释掉；
+ *   2. #error 的字符串消息（GLSL ES 没有字符串字面量）
+ *      -> 规范化为合法 token。
+ *
+ * 不做条件分支求值：宏由驱动预处理器负责，我们越权求值只会制造
+ * 新的兼容性问题。
+ */
+static void normalize_preprocessor_directives(sbuf *out, const char *src) {
     const char *p = src;
+#ifndef GLESMOD_NO_ERROR_DIRECTIVE_FIX
+    int error_marker_emitted = 0;
+#endif
+
     while (*p != '\0') {
         const char *eol = strchr(p, '\n');
         size_t line_len = eol ? (size_t)(eol - p + 1) : strlen(p);
+        const char *line_end = p + line_len;
 
         const char *q = p;
-        while (*q == ' ' || *q == '\t') q++;
+        while (q < line_end && (*q == ' ' || *q == '\t')) q++;
 
         if (strncmp(q, "#extension", 10) == 0) {
             /* 取出扩展名 */
@@ -506,6 +562,38 @@ static void strip_desktop_extensions(sbuf *out, const char *src) {
                 continue;
             }
         }
+
+#ifndef GLESMOD_NO_ERROR_DIRECTIVE_FIX
+        if (strncmp(q, "#error", 6) == 0 &&
+            (q + 6 >= line_end || !is_ident_char(q[6]))) {
+            const char *msg = q + 6;
+            while (msg < line_end && (*msg == ' ' || *msg == '\t')) msg++;
+
+            const char *msg_end = line_end;
+            while (msg_end > msg &&
+                   (msg_end[-1] == '\n' || msg_end[-1] == '\r' ||
+                    msg_end[-1] == ' ' || msg_end[-1] == '\t')) {
+                msg_end--;
+            }
+
+            /* 保留前导空白与 #error 本身 */
+            sbuf_put(out, p, (size_t)((q + 6) - p));
+            if (msg < msg_end) {
+                sbuf_put(out, " ", 1);
+                emit_error_message_tokens(out, msg, (size_t)(msg_end - msg));
+            }
+            sbuf_put(out, "\n", 1);
+
+            if (!error_marker_emitted) {
+                error_marker_emitted = 1;
+                glesmod_log("预处理器: #error 消息已规范化为 GLSL ES 合法 token"
+                            "（GLESMOD_ERROR_DIRECTIVE_NORMALIZED）");
+            }
+
+            p += line_len;
+            continue;
+        }
+#endif
 
         sbuf_put(out, p, line_len);
         p += line_len;
@@ -9372,13 +9460,18 @@ char *glesmod_convert_shader_source(const char *src, int *out_len, int stage_gl)
     (void)version;  /* 原版本号不参与决策，统一转为 320 es */
 
     /*
-     * 步骤 1b：删除 GLSL ES 不支持的 #extension 指令。
+     * 步骤 1b：规范化 GLSL ES 不支持的预处理器指令。
      *
-     * 桌面着色器常见写法：
-     *     #extension GL_ARB_separate_shader_objects : require
-     * ARB 扩展在 ES 里不存在，而 `require` 的语义是「不支持则报错」，
-     * 直接导致编译失败。ES 3.x 已原生支持独立着色器对象与 location
-     * 限定符，因此删掉该行是正确的。
+     *  - 桌面专属 #extension：
+     *        #extension GL_ARB_separate_shader_objects : require
+     *    ARB 扩展在 ES 里不存在，而 `require` 的语义是「不支持则报错」，
+     *    直接导致编译失败。ES 3.x 已原生支持独立着色器对象与 location
+     *    限定符，因此删掉该行是正确的。
+     *
+     *  - #error 的字符串消息：
+     *        #error "Vertex compression must be enabled"
+     *    GLSL ES 没有字符串字面量。Mali 即使在非活动分支里也会在引号上
+     *    报 L0001，因此把消息规范化为合法 token。
      */
     sbuf noext;
     sbuf_init(&noext, INITIAL_CAP);
@@ -9386,13 +9479,13 @@ char *glesmod_convert_shader_source(const char *src, int *out_len, int stage_gl)
         free(body.buf);
         return NULL;
     }
-    strip_desktop_extensions(&noext, body.buf);
+    normalize_preprocessor_directives(&noext, body.buf);
     free(body.buf);
     if (noext.failed) { free(noext.buf); return NULL; }
     body = noext;
 
     /*
-     * 步骤 1b：展开「对象式整型常量宏」。
+     * 步骤 1c：展开「对象式整型常量宏」。
      *
      * 【为什么必须在字面量处理之前】
      *   见 expand_int_const_macros 的长注释：同一个宏可能同时出现在

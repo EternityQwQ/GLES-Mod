@@ -120,3 +120,13 @@ GLESMOD_AMBIG_DROP
 # Note textureLod is deliberately NOT in the table: its lod is a float and DOES
 # need `.0`. Same syntax, opposite requirement -- hence a per-function table.
 GLESMOD_RULE_S_BUILTIN_INT_ARGS
+
+# #error directives in desktop shaders commonly carry a quoted message:
+#     #error "Vertex compression must be enabled"
+# GLSL ES has no string literal token. Mali lexes the quote even in an
+# inactive #else branch and fails the whole shader with
+#     2:65: L0001: Unknown character '"'(34)
+# which crashes Sodium + Iris when entering a world. The converter now
+# normalises the message to identifier/space tokens; this marker exists only
+# in that path, so a stale .so cannot silently reintroduce the crash.
+GLESMOD_ERROR_DIRECTIVE_NORMALIZED

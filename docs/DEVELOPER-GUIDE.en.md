@@ -284,6 +284,7 @@ compiles*, not merely how it performs:
 | `texture2D(s, uv)` | `texture(s, uv)` |
 | `gl_FragColor` | `out vec4` declared by the shader |
 | `#version 330 core` | `#version 320 es` |
+| `#error "message"` | `#error message` (ES has no string literal; Mali scans the quote even in an inactive branch) |
 | sampler types have default precision | **Every sampler type needs `precision`** |
 
 So the converter must do real type analysis, while being a linear scanner — it
@@ -297,8 +298,10 @@ has no full parser and no symbol table beyond what it builds itself.
 2. `expand_moj_imports` — expand `#moj_import <file>`. (On device this is
    already done by Minecraft before the source reaches us; retained as
    defence.)
-3. `extract_version`, then `strip_desktop_extensions` — remove extensions that
-   exist only on desktop.
+3. `extract_version`, then `normalize_preprocessor_directives` — remove
+   desktop-only extensions and normalise `#error` string messages into valid
+   GLSL ES tokens (ES has no string literal; Mali scans the quote even in an
+   inactive branch).
 4. `expand_int_const_macros` — inline integer constant macros first, so that a
    macro used in both integer and float contexts is judged per use site.
 5. **Qualifier conversion** and sampling-function renaming.
@@ -315,6 +318,10 @@ has no full parser and no symbol table beyond what it builds itself.
     are hoisted into an injected assignment function.
 11. **Assembly** — prepend `#version 320 es`, precision declarations, sampler
     precision, and map `gl_FragColor`.
+
+> The `#error` normalisation in stage 3 can be disabled with
+> `-DGLESMOD_NO_ERROR_DIRECTIVE_FIX` for A/B attribution; its marker string is
+> `GLESMOD_ERROR_DIRECTIVE_NORMALIZED`.
 
 ### 5.3 The central difficulty: context is not local
 

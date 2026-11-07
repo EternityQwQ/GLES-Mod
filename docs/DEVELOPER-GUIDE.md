@@ -263,6 +263,7 @@ native 枚举与 Java 的 `DegradeReason` 必须保持同步；Java 侧遇到未
 | `texture2D(s, uv)` | `texture(s, uv)` |
 | `gl_FragColor` | 由着色器自己声明的 `out vec4` |
 | `#version 330 core` | `#version 320 es` |
+| `#error "message"` | `#error message`（ES 没有字符串字面量；Mali 连非活动分支也会扫描引号） |
 | 采样器类型有默认精度 | **每种采样器类型都要 `precision`** |
 
 因此转换器必须做**真正的类型分析**，却又只是一个线性扫描器 ——
@@ -275,7 +276,9 @@ native 枚举与 Java 的 `DegradeReason` 必须保持同步；Java 侧遇到未
 1. **提前返回**：源码已声明 `#version … es` 时直接放行。
 2. `expand_moj_imports` —— 展开 `#moj_import <file>`。
    （真机上 Minecraft 在源码到达我们之前就已经展开，此项作为防御保留。）
-3. `extract_version` 与 `strip_desktop_extensions` —— 去掉仅桌面存在的扩展。
+3. `extract_version` 与 `normalize_preprocessor_directives` —— 去掉仅桌面存在的扩展，
+   并把 `#error` 的字符串消息规范化为 GLSL ES 合法 token
+   （GLSL ES 没有字符串字面量；Mali 的非活动分支也会扫描引号）。
 4. `expand_int_const_macros` —— **先**展开整数常量宏，
    这样同一个宏在整数与浮点上下文中的两次使用能分别判断。
 5. **限定符转换**与采样函数改名。
@@ -289,6 +292,9 @@ native 枚举与 Java 的 `DegradeReason` 必须保持同步；Java 侧遇到未
     提升进一个注入的赋值函数。
 11. **组装** —— 前置 `#version 320 es`、精度声明、采样器精度，并映射
     `gl_FragColor`。
+
+> 第 3 步的 `#error` 规范化可用 `-DGLESMOD_NO_ERROR_DIRECTIVE_FIX` 关闭，
+> 用于 A/B 归因；对应标记字符串为 `GLESMOD_ERROR_DIRECTIVE_NORMALIZED`。
 
 ### 5.3 核心难点：上下文不是局部信息
 
