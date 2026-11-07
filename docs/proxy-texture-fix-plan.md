@@ -1,13 +1,14 @@
 # Proxy texture 仿真修复计划（ANGLE 2.1.1 启动崩溃）
 
-> 状态：🚧 **开发中（Phase 1–3 已落地，待 NDK 构建与真机验证）**
-> 日期：2026-11-06
+> 状态：✅ **核心修复已完成并真机验证（2026-11-07）**
+> 日期：2026-11-06 ～ 2026-11-07
 > 范围：GLES-Mod native 层（`libgl_gles.so`）+ FCL 渲染器插件 APK；不改 FCL，不改 NeoForge 模组
 > 目标：修复 MC 1.21.1 在 ANGLE 模式下 `RenderSystem.maxSupportedTextureSize()` 的 SIGSEGV
 > 参考实现：MobileGlues `MobileGlues-cpp/gl/texture.cpp` 的 proxy texture 处理
 > 关联文档：`docs/angle-gles-driver-plan.md`、`docs/p2-04-degrade-routing.md`、`docs/DEVELOPER-GUIDE.md`
 > 关系：`docs/angle-gles-driver-plan.md` 的 Phase 0 PoC 发现 ANGLE 模式在 `maxSupportedTextureSize` 崩溃；本计划是该阻塞项的 native 修复，完成后才能继续 ANGLE 开关的 Phase 1/2。
-> 本地说明：本文件仅写入本地；`GLES-Mod-main` 当前不是 git 仓库，未执行任何提交或推送。
+> 仓库说明：`GLES-Mod-main` 现为本地 git 仓库，远端为 `EternityQwQ/GLES-Mod`，修复在 `fix/angle-proxy-texture` 分支。
+> 已知遗留：CI 每次构建会生成新的 debug keystore，导致新 APK 无法覆盖旧安装；按用户要求**暂不处理**，当前需卸载旧插件后安装新 APK。
 
 ---
 
@@ -188,20 +189,22 @@ GLESMOD_PROXY_EMU=0/1   默认 1
 
 ### Phase 0：基线确认（0.5 天）
 
-- [ ] 用当前插件 + ANGLE 模式复现一次崩溃，保存：
-  - FCL 日志（`fcl-latest-*.log`）；
+- [x] 用当前插件 + ANGLE 模式复现一次崩溃，保存：
+  - FCL 日志（`fcl-latest-560015124094015090.log`）；
   - `glesmod/native.log`；
   - `status.json`；
-  - `hs_err_pid*.log`（如生成）。
-- [ ] 用原生模式跑一次，确认不崩，作为对照。
-- [ ] 记录 `GL_MAX_TEXTURE_SIZE`（本机 16384）、`GL_RENDERER`、ANGLE 版本。
-- [ ] 确认 `glGetTexLevelParameteriv` 当前在 `symbols.def` 中是 `F`。
+  - `hs_err_pid*.log`。
+- [x] 用原生模式跑一次，确认不崩，作为对照。
+- [x] 记录 `GL_MAX_TEXTURE_SIZE`（本机 16384）、`GL_RENDERER`（ANGLE + Adreno 619）、ANGLE 版本（2.1.1）。
+- [x] 确认 `glGetTexLevelParameteriv` 当时在 `symbols.def` 中是 `F`。
 
-**验收**：能稳定复现 ANGLE 模式启动崩溃；原生模式正常。
+**实际结果**：已稳定复现 ANGLE 模式在 `RenderSystem.maxSupportedTextureSize` 的 SIGSEGV；原生模式正常。后续另有一份 `fcl-latest-1628002214646083008.log` 复现同一崩溃，并确认当时设备仍加载旧的 `2.0.0-pre47 / Oct 18` 原生库。
+
+**验收**：✅ 通过。
 
 ### Phase 1：proxy 状态与 helper（1–2 天）
 
-- [ ] 在 `custom.c` 增加：
+- [x] 在 `custom.c` 增加：
   - `glesmod_proxy_state_t`；
   - `glesmod_is_proxy_target()`；
   - `glesmod_proxy_max_texture_size()`；
@@ -209,36 +212,40 @@ GLESMOD_PROXY_EMU=0/1   默认 1
   - `glesmod_proxy_level_size()`；
   - `glesmod_proxy_record()`；
   - `glesmod_proxy_query()`。
-- [ ] 用 `GL_MAX_TEXTURE_SIZE` 查询一次并缓存；查询失败回退 4096。
-- [ ] 增加一次性日志，确认拦截生效。
-- [ ] 可选：增加 `GLESMOD_PROXY_EMU` 开关。
+- [x] 用 `GL_MAX_TEXTURE_SIZE` 查询一次并缓存；查询失败回退 4096。
+- [x] 增加一次性日志，确认拦截生效。
+- [x] 增加 `GLESMOD_PROXY_EMU` 开关（默认 1，0 可退回旧行为）。
 
-**验收**：编译通过；helper 逻辑可用（可先写一个 host 小测试，或仅在真机日志验证）。
+**实际结果**：`native/src/custom.c` 已实现；`clang -Wall -Wextra -Wshadow -Wconversion` 无新增警告。
+
+**验收**：✅ 通过。
 
 ### Phase 2：接入 GL 入口（1 天）
 
-- [ ] `glTexImage2D` 开头拦截 proxy target，调用 `glesmod_proxy_record(..., depth=1)` 后返回。
-- [ ] `glTexImage3D` 开头拦截 proxy target，调用 `glesmod_proxy_record(..., depth)` 后返回。
-- [ ] 实现 `glGetTexLevelParameteriv`：
+- [x] `glTexImage2D` 开头拦截 proxy target，调用 `glesmod_proxy_record(..., depth=1)` 后返回。
+- [x] `glTexImage3D` 开头拦截 proxy target，调用 `glesmod_proxy_record(..., depth)` 后返回。
+- [x] 实现 `glGetTexLevelParameteriv`：
   - proxy target → 返回记录值；
   - 其他 target → 解析并转发给真实 GLES 函数。
-- [ ] 实现 `glGetTexLevelParameterfv`，同上。
-- [ ] 把 `texprobe_report()` 的 3 个硬编码 proxy 常量替换为 `glesmod_is_proxy_target(target)`，顺带修正 `0x8071/0x8072` 的错误常量。
-- [ ] 在 `gl_internal.h` 增加两个函数声明。
+- [x] 实现 `glGetTexLevelParameterfv`，同上。
+- [x] 把 `texprobe_report()` 的 3 个硬编码 proxy 常量替换为 `glesmod_is_proxy_target(target)`，顺带修正 `0x8071/0x8072` 的错误常量。
+- [x] 在 `gl_internal.h` 增加两个函数声明。
 
-**验收**：ANGLE 模式下 `maxSupportedTextureSize` 不再崩溃；原生模式不回归。
+**实际结果**：用户安装新插件 APK 后确认 ANGLE 模式启动崩溃已修复；`native.log` 应出现 `[GLESMod] proxy texture 仿真`（新 APK 内已确认包含该字符串）。
+
+**验收**：✅ ANGLE 启动崩溃已修复；原生模式完整回归尚未单独归档（见 §17）。
 
 ### Phase 3：符号表与生成器（0.5 天）
 
-- [ ] `gen_symbols_def.py` 的 `CUSTOM_SYMBOLS` 加入：
+- [x] `gen_symbols_def.py` 的 `CUSTOM_SYMBOLS` 加入：
 
   ```python
   "glGetTexLevelParameteriv",
   "glGetTexLevelParameterfv",
   ```
 
-- [ ] `native/symbols.def` 把两行从 `F` 改成 `C`。
-- [ ] 重新生成 `generated_forwarders.c`：
+- [x] `native/symbols.def` 把两行从 `F` 改成 `C`。
+- [x] 重新生成 `generated_forwarders.c`：
 
   ```bash
   python native/tools/gen_gl_forwarders.py \
@@ -246,11 +253,13 @@ GLESMOD_PROXY_EMU=0/1   默认 1
       --out native/src/generated_forwarders.c
   ```
 
-- [ ] 确认 `generated_forwarders.c` 不再包含这两个转发函数，避免与 `custom.c` 重复定义。
-- [ ] 如果手工改 `symbols.def`，同步更新头部计数注释（F 339→337，C 26→28）。
-- [ ] 运行 `check_symbols.py`，确认导出符号数仍为 849。
+- [x] 确认 `generated_forwarders.c` 不再包含这两个转发函数，避免与 `custom.c` 重复定义。
+- [x] 同步更新头部计数注释（F 339→337，C 26→28）。
+- [x] 运行 `check_symbols.py`，确认导出符号数仍为 849。
 
-**验收**：链接无重复符号；`check_symbols.py` 通过；849 个符号齐全。
+**实际结果**：生成器输出 `337 F / 484 S / 28 C = 849`；CI 产出的 APK 内 `libgl_gles.so` 的 `check_symbols.py` 覆盖率 100%，`glGetTexLevelParameteriv/fv` 均为导出符号。
+
+**验收**：✅ 通过。
 
 ### Phase 4：构建与主机门禁（0.5 天）
 
@@ -261,16 +270,19 @@ GLESMOD_PROXY_EMU=0/1   默认 1
 ```
 
 - [ ] `run_all_gates.py` 全绿（含新增 `proxy emu` 门禁）；
-- [ ] `check_symbols.py` 通过；
-- [ ] `check_proxy_emulation.py` 通过；
-- [ ] `check_artifact_freshness.py` 通过（APK 内 `.so` 与源码一致）；
-- [ ] `nm -D`/`llvm-readelf` 确认 `glGetTexLevelParameteriv/fv` 仍导出。
+  - ⚠️ 未跑完整套件（依赖 glslang / 第三方夹具）；CI 已跑 `proxy emu`、`doc facts`、`check_symbols`。
+- [x] `check_symbols.py` 通过；
+- [x] `check_proxy_emulation.py` 通过；
+- [x] `check_artifact_freshness.py` 通过（本次以手动 build stamp + `proxy texture` 字符串校验替代）；
+- [x] `nm -D`/`llvm-readelf` 确认 `glGetTexLevelParameteriv/fv` 仍导出。
 
-**验收**：两个 ABI 构建成功，主机门禁全绿。
+**实际结果**：GitHub Actions run `42317566973` 两个 job 均成功；arm64-v8a / armeabi-v7a 均构建成功；APK 内 arm64 `libgl_gles.so` 为 `Nov  7 2026`，包含 `[GLESMod] proxy texture` 与 `GLESMOD_PROXY_EMU`，`check_symbols.py` 覆盖率 100%。
+
+**验收**：✅ 两个 ABI 构建成功；完整 `run_all_gates.py` 尚未执行（见 §17 遗留项）。
 
 ### Phase 5：真机验证（1–2 天）
 
-设备矩阵：
+设备矩阵（计划覆盖；实际完成情况以下方断言和 §16 为准）：
 
 | 场景 | 原生模式 | ANGLE 模式 | 通过标准 |
 |---|---|---|---|
@@ -284,29 +296,28 @@ GLESMOD_PROXY_EMU=0/1   默认 1
 
 断言：
 
-- [ ] `glesmod/native.log` 出现：
-
-  ```text
-  proxy texture 仿真: target=0x8064 level=0 32768x32768x1 max=16384 -> 0x0x0
-  ```
-
-- [ ] 不再出现 `libGLESv2_angle.so+0x268710`；
-- [ ] `GL_RENDERER` 仍含 `ANGLE`；
-- [ ] `status.json` 的 `max_texture_size` 为 16384（或设备真实值）；
+- [x] 新 APK 的 `libgl_gles.so` 内含 `[GLESMod] proxy texture` 日志字符串（已离线校验）。
+- [x] 用户确认安装新 APK 后 ANGLE 模式启动崩溃已修复；不再出现 `libGLESv2_angle.so+0x268710`。
+- [ ] `GL_RENDERER` 仍含 `ANGLE`（待补 post-fix 日志归档）。
+- [ ] `status.json` 的 `max_texture_size` 为 16384（待补 post-fix 日志归档）。
 - [ ] 原生模式日志中出现拦截但不影响结果（MC 仍回落到 `GL_MAX_TEXTURE_SIZE`）。
+- [ ] Sodium / Embeddium / Iris / 退出游戏 / 8192/32768 设备的完整矩阵尚未逐项回归。
 
-**验收**：ANGLE 模式稳定启动并进世界；原生模式无回归。
+**实际结果**：用户确认 ANGLE 模式启动崩溃已修复；完整真机矩阵未逐项归档。
+
+**验收**：⚠️ 核心崩溃已修复；完整矩阵待补测。
 
 ### Phase 6：文档与回滚准备（0.5 天）
 
-- [ ] 更新 `docs/DEVELOPER-GUIDE.md` / `.en.md`：新增“proxy texture 仿真”小节；
+- [x] 更新 `docs/DEVELOPER-GUIDE.md` / `.en.md`：新增“proxy texture 仿真”小节；
 - [ ] 更新 `docs/architecture.md` §2.5 或纹理章节：说明 GLES 无 proxy target，由 native 仿真；
 - [ ] 更新 `README.md` 已知限制：ANGLE 模式已处理 proxy texture；
+  - 注：README 的 337/28 计数已同步，但专门的 ANGLE/proxy 说明尚未补。
 - [ ] 更新 `docs/p2-07-compatibility-matrix.md`：增加 ANGLE 行；
-- [ ] 记录本次日志/测试结果；
-- [ ] 如果加了 `GLESMOD_PROXY_EMU`，写入环境变量表。
+- [x] 记录本次日志/测试结果（见 §16）；
+- [x] 如果加了 `GLESMOD_PROXY_EMU`，写入环境变量表。
 
-**验收**：文档与实现一致；回滚步骤明确。
+**验收**：⚠️ 核心文档已更新；architecture / README 专门条目 / p2-07 仍待补。
 
 ---
 
@@ -581,31 +592,33 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 
 ## 10. 验收标准
 
+> 标记规则：已实际验证或已离线校验的标 `[x]`；未逐项执行或缺少 post-fix 日志的保留 `[ ]`。
+
 功能：
 
-- [ ] ANGLE 模式下 MC 1.21.1 能启动到主菜单并进世界；
-- [ ] 不再在 `RenderSystem.maxSupportedTextureSize` 崩溃；
-- [ ] 原生模式无回归；
-- [ ] 只装插件、不装模组也能生效。
+- [x] ANGLE 模式下 MC 1.21.1 启动不再在 `RenderSystem.maxSupportedTextureSize` 崩溃（用户真机确认）；
+- [x] 不再出现 `libGLESv2_angle.so+0x268710`（用户真机确认）；
+- [ ] 原生模式完整回归（未逐项归档）；
+- [ ] 只装插件、不装模组（未单独验证）。
 
 正确性：
 
-- [ ] `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, 0, GL_TEXTURE_WIDTH)` 返回 0（32768 探测）；
-- [ ] 16384 探测返回 16384（或设备真实 max）；
-- [ ] 其他非 proxy 查询仍正常转发；
-- [ ] 849 个导出符号不变；
-- [ ] `run_all_gates.py` 全绿。
+- [ ] `glGetTexLevelParameteriv(GL_PROXY_TEXTURE_2D, 0, GL_TEXTURE_WIDTH)` 返回 0（32768 探测，待 post-fix 日志）；
+- [ ] 16384 探测返回 16384（待 post-fix 日志）；
+- [x] 其他非 proxy 查询仍原样转发（代码路径保留 `real(...)`）；
+- [x] 849 个导出符号不变（CI `check_symbols.py` 100%）；
+- [ ] `run_all_gates.py` 全绿（未跑完整套件）。
 
 兼容性：
 
-- [ ] Sodium / Embeddium 至少各跑一轮；
-- [ ] 光影包至少一个通过或明确跳过；
-- [ ] 8192/16384/32768 设备（如有）返回值正确。
+- [ ] Sodium / Embeddium 至少各跑一轮（未做 post-fix 回归）；
+- [ ] 光影包至少一个通过或明确跳过（未做 post-fix 回归）；
+- [ ] 8192/16384/32768 设备（如有）返回值正确（未测）。
 
 文档：
 
-- [ ] `DEVELOPER-GUIDE.md` / `.en.md` 增加 proxy 仿真说明；
-- [ ] `README.md` 更新已知限制；
+- [x] `DEVELOPER-GUIDE.md` / `.en.md` 增加 proxy 仿真说明；
+- [ ] `README.md` 更新已知限制（仅同步了计数）；
 - [ ] `architecture.md` 更新纹理/proxy 描述；
 - [ ] `p2-07-compatibility-matrix.md` 增加 ANGLE 行。
 
@@ -654,19 +667,19 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 ## 14. 待确认问题
 
 1. **范围**：第一阶段只做 `GL_PROXY_TEXTURE_2D`，还是一次性覆盖所有 proxy target？
-   - 建议：先 2D 验证，再扩展 3D/array。
+   - ✅ 已按 2D 路径完成并验证；array/1D 的完整 mip 语义仍遗留（见 §17）。
 2. **开关**：是否加 `GLESMOD_PROXY_EMU=0/1`？
-   - 建议加，便于 A/B 和快速回滚。
+   - ✅ 已加，默认 1。
 3. **context 判别**：是否需要在本阶段处理同一线程多 context？
-   - 建议先按线程局部，后续按需加 `eglGetCurrentContext`。
+   - ⏳ 暂按线程局部；per-context 判别遗留。
 4. **max texture size 缓存**：`GL_MAX_TEXTURE_SIZE` 是否可能随 context 变化？
-   - 一般不变；如需严格，可按 context 缓存。
+   - ⏳ 当前全局缓存；如需严格再按 context 缓存。
 5. **MobileGlues 参考边界**：只参考语义，还是允许引用其代码片段？
-   - 建议自行实现，避免 LGPL-2.1/3.0 混用的解释成本。
+   - ✅ 按语义自行实现，未逐字复制。
 6. **插件版本号**：修复后是否 bump 插件版本，方便用户确认安装的是新 APK？
-   - 建议 bump。
+   - ✅ 已 bump 到 versionCode `2` / versionName `1.1.0`。
 7. **是否并行提供 mod-only Mixin 兜底**？
-   - 可作为不能更新插件的用户的临时方案，但不替代 native 修复。
+   - ⏳ 未实现；当前以 native 修复为主。
 
 ---
 
@@ -675,3 +688,89 @@ proxy 路径只在启动时执行，理论上对帧率无影响。记录：
 | 日期 | 变更 |
 |---|---|
 | 2026-11-06 | 初稿：根因、方案选择、Phase 0–6、代码草案、测试矩阵、风险与回滚 |
+| 2026-11-07 | 标记完成项：Phase 0–3 完成；CI 构建 + APK 产物校验通过；用户真机确认 ANGLE 启动崩溃已修复；签名密钥问题按用户要求暂不处理 |
+
+---
+
+## 16. 实际完成记录
+
+### 16.1 代码与提交
+
+| 项 | 内容 |
+|---|---|
+| 修复提交 | `194a16e fix(native): emulate GL_PROXY_TEXTURE_* to avoid ANGLE startup crash` |
+| CI 提交 | `495da63 ci: build native APK and NeoForge JAR` |
+| 分支 | `fix/angle-proxy-texture` |
+| 远端 | `EternityQwQ/GLES-Mod` |
+| 变更规模 | 13 files changed, +1725 / -51（修复提交） |
+
+### 16.2 CI 构建
+
+| 项 | 内容 |
+|---|---|
+| Workflow | `.github/workflows/build.yml` |
+| Run | `42317566973`（Build APK and JAR） |
+| JAR job | ✅ success |
+| APK job | ✅ success |
+| APK artifact | `glesmod-renderer-plugin-apk`（750,067 bytes） |
+| Native libs | `glesmod-native-libs`（742,133 bytes） |
+| JAR artifact | `glesmod-jar`（28,628 bytes） |
+
+### 16.3 APK 产物校验
+
+| 项 | 结果 |
+|---|---|
+| arm64 `libgl_gles.so` 构建戳 | `Nov  7 2026` |
+| proxy 日志字符串 | 含 `[GLESMod] proxy texture` |
+| 环境变量开关 | 含 `GLESMOD_PROXY_EMU` |
+| 导出符号 | `check_symbols.py` 覆盖率 100%（849/849） |
+| `glGetTexLevelParameteriv/fv` | 均为导出符号 |
+
+### 16.4 真机结果
+
+| 项 | 结果 |
+|---|---|
+| 设备 | Oppo PGGM10 / SM6375 / Adreno 619 / Android 14 |
+| ANGLE | 2.1.1（`2f91cb5f753e`） |
+| 修复前 | `RenderSystem.maxSupportedTextureSize` → `GL_GetTexLevelParameteriv` SIGSEGV |
+| 修复后 | 用户确认启动崩溃已修复 |
+| 备注 | 当时设备上旧插件仍为 `2.0.0-pre47 / Oct 18`；需安装新 APK 后生效 |
+
+---
+
+## 17. 已知遗留（本次未处理）
+
+> 以下按用户要求暂不处理，记录在此避免遗忘。
+
+1. **CI 签名密钥不稳定（用户要求暂不解决）**
+   - `fcl-plugin/debug.keystore` 被 `.gitignore` 排除，CI 每次生成新密钥；
+   - 旧 APK 证书 `71:BB...`，CI 新 APK 证书 `01:81...`；
+   - 结果：新 APK 无法覆盖旧安装，必须卸载旧插件后安装；
+   - 建议：把固定 keystore 存入 GitHub Secret，在 APK job 构建前恢复，并 bump `--version-code`。
+
+2. **Array / 1D proxy 的 mip 维度语义不完整**
+   - 当前 `depth_is_volume` 把 2D_ARRAY / CUBE_ARRAY / MULTISAMPLE_ARRAY 也当成 volume；
+   - array 的 layers 跨 mip 不变，1D_ARRAY 的 height（layers）也不变；
+   - MC 1.21.1 只走 `GL_PROXY_TEXTURE_2D`，所以不影响当前修复；
+   - 建议：收窄 target 范围，或按 target 实现 width/height/depth 的 mip 规则。
+
+3. **proxy 状态是线程局部，不是 per-context**
+   - 同一线程多 context 时可能串扰；MC 单 context 暂不受影响。
+
+4. **静态缓存未加锁**
+   - `glesmod_proxy_max_texture_size` / `glesmod_proxy_emu_enabled` 的首次初始化存在良性竞争。
+
+5. **proxy query 的错误语义不完整**
+   - 非法 pname / `params == NULL` 不产生 GL 错误；对 MC 无影响。
+
+6. **静态门禁较脆**
+   - `check_proxy_emulation.py` 依赖 `^void ...` 和 guard 次数；代码风格变化可能误报。
+
+7. **CI action 未 pin SHA**
+   - `actions/checkout@v4`、`android-actions/setup-android@v3`、`actions/upload-artifact@v4` 未固定 commit；供应链安全建议后续 pin。
+
+8. **完整测试矩阵未跑**
+   - `run_all_gates.py`、原生模式回归、Sodium/Embeddium/Iris、退出游戏、8192/32768 设备尚未逐项归档。
+
+9. **顺带发现（非本次引入）**
+   - `check_symbols.py` 报告额外导出 `glDrawPixels`，但它不在 `symbols.def`；实际导出 850，声明 849。

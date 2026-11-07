@@ -1,7 +1,7 @@
 # ANGLE 作为 GLES 驱动可选后端 —— 实施计划
 
-> 状态：📝 **计划中（尚未实现）**
-> 日期：2026-11-06
+> 状态：🚧 **计划中（Phase 0 阻塞项已修复；v2 ANGLE 开关已实现，待真机验证；自动回退尚未实现）**
+> 日期：2026-11-06 ～ 2026-11-07
 > 范围：GLES-Mod 的 FCL 渲染器插件 + native 后端；FCL 侧默认不改
 > 目标：在渲染器插件设置中增加「使用 ANGLE 作为 GLES 驱动」开关，默认关闭
 > 关联文档：`docs/architecture.md` §2.5、`docs/DEVELOPER-GUIDE.md` §3/§8、`docs/p2-04-degrade-routing.md`、`docs/p3-01-hotpath-optimization.md`
@@ -234,6 +234,10 @@ LIBGL_GLES=libGLESv2_angle.so
 - 记录启动耗时、进世界耗时、大致 FPS，与原生模式对比。
 
 **风险**：如果 `libEGL_angle.so` **加载失败**，FCL 的 `loader_dlopen` 会回落到 `libEGL.so`，而 GLES-Mod 仍在尝试 `libEGL_angle.so`，可能出现错配；如果是 `eglInitialize` / `eglCreateContext` **初始化失败**，当前链路没有自动回退，会直接启动失败。PoC 阶段先看日志区分这两种情况；正式阶段再决定是否在 FCL 侧加回退（Phase 4）。
+
+> ✅ **2026-11-07 更新**：Phase 0 发现的 `RenderSystem.maxSupportedTextureSize` 崩溃已由 `docs/proxy-texture-fix-plan.md` 的 native proxy texture 仿真修复，用户真机确认 ANGLE 模式可启动；修复提交为 `194a16e`，CI 构建为 `495da63`。
+>
+> ✅ **2026-11-07 继续**：Phase 2 的 v2 可配置开关已实现——插件清单增加 `fclPlugin_V2`，`renderer_config` 中提供 `ToggleableEnv: POJAVEXEC_EGL=libEGL_angle.so`（默认关闭）；native `get_gles_handle()` 会按 `LIBGL_GLES` / `POJAVEXEC_EGL` 选择同源 GLES 库。待真机验证开关关闭/打开两种路径。Phase 4 的自动回退仍未实现。
 
 ### Phase 1：native 后端选择与可观测性（约 0.5–1 天）
 
