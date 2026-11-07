@@ -850,13 +850,11 @@ static const char *tex_internalformat_name(GLint f)
 #define GLESMOD_GL_TEXTURE_WIDTH                         0x1000
 #define GLESMOD_GL_TEXTURE_HEIGHT                        0x1001
 #define GLESMOD_GL_TEXTURE_INTERNAL_FORMAT               0x1003
-#define GLESMOD_GL_TEXTURE_DEPTH                         0x8071
 #define GLESMOD_GL_MAX_TEXTURE_SIZE                      0x0D33
 
 typedef struct {
     GLsizei width;          /* base level（level 0）宽度 */
     GLsizei height;
-    GLsizei depth;
     GLenum  internal_format;
     int     valid;
 } glesmod_proxy_state_t;
@@ -864,6 +862,8 @@ typedef struct {
 /* 每个线程一份；MC 的探测在 Render thread 上，单线程足够。 */
 static __thread glesmod_proxy_state_t g_proxy_state;
 static __thread int g_proxy_logged = 0;
+static __thread GLenum g_proxy_unsupported_logged[8];
+static __thread int g_proxy_unsupported_count = 0;
 
 static int glesmod_is_proxy_target(GLenum target)
 {
@@ -884,6 +884,29 @@ static int glesmod_is_proxy_target(GLenum target)
     }
 }
 
+/*
+ * 真正实现了 proxy 语义的 target。
+ *
+ * 只保留已验证的 2D / cube / rectangle：
+ *   - 它们的尺寸只随 mip level 缩小 width/height；
+ *   - depth/layers 恒为 1；
+ *   - MC 1.21.1 的 maxSupportedTextureSize 只走 GL_PROXY_TEXTURE_2D。
+ *
+ * 1D/3D/array/multisample 不在列表里：它们仍然被 glesmod_is_proxy_target()
+ * 识别，但按“未实现”安全降级，不进入 ANGLE。
+ */
+static int glesmod_is_emulated_proxy_target(GLenum target)
+{
+    switch (target) {
+        case GLESMOD_GL_PROXY_TEXTURE_2D:
+        case GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP:
+        case GLESMOD_GL_PROXY_TEXTURE_RECTANGLE:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 /* 0 = 关闭仿真（退回旧行为），1 = 启用；默认启用。 */
 static int glesmod_proxy_emu_enabled(void)
 {
@@ -897,7 +920,25 @@ static int glesmod_proxy_emu_enabled(void)
 
 static int glesmod_should_emulate_proxy(GLenum target)
 {
-    return glesmod_is_proxy_target(target) && glesmod_proxy_emu_enabled();
+    return glesmod_is_emulated_proxy_target(target) && glesmod_proxy_emu_enabled();
+}
+
+static void glesmod_log_proxy_unsupported(GLenum target)
+{
+    int i;
+    char msg[128];
+
+    for (i = 0; i < g_proxy_unsupported_count; i++) {
+        if (g_proxy_unsupported_logged[i] == target) return;
+    }
+    if (g_proxy_unsupported_count <
+        (int)(sizeof(g_proxy_unsupported_logged) / sizeof(g_proxy_unsupported_logged[0]))) {
+        g_proxy_unsupported_logged[g_proxy_unsupported_count++] = target;
+    }
+    snprintf(msg, sizeof(msg),
+             "[GLESMod] proxy target 0x%04X 未实现，按不可分配处理",
+             (unsigned)target);
+    glesmod_log(msg);
 }
 
 static GLint glesmod_proxy_max_texture_size(void)
@@ -937,38 +978,24 @@ static GLint glesmod_proxy_level_size(GLint base, GLint level)
 }
 
 static void glesmod_proxy_record(GLenum target, GLint level, GLint internalformat,
-                                 GLsizei width, GLsizei height, GLsizei depth)
+                                 GLsizei width, GLsizei height)
 {
     GLint max = glesmod_proxy_max_texture_size();
 
     GLsizei base_w = glesmod_proxy_base_size(width, level);
     GLsizei base_h = glesmod_proxy_base_size(height, level);
-    /*
-     * 2D/rectangle/cube/1D 的 depth 恒为 1，不随 level 左移；
-     * 只有 3D / array 的 depth 才是真正的层数。
-     */
-    int depth_is_volume =
-        (target == GLESMOD_GL_PROXY_TEXTURE_3D ||
-         target == GLESMOD_GL_PROXY_TEXTURE_2D_ARRAY ||
-         target == GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP_ARRAY ||
-         target == GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE_ARRAY);
-    GLsizei base_d = depth_is_volume
-                         ? glesmod_proxy_base_size(depth, level)
-                         : 1;
 
     /*
      * 桌面 proxy 语义：该 level 的任一维度超过 GL_MAX_TEXTURE_SIZE，
      * 就视为“不可分配”，proxy 的尺寸读回 0。
      */
-    if ((GLint)width > max || (GLint)height > max || (GLint)depth > max) {
+    if ((GLint)width > max || (GLint)height > max) {
         base_w = 0;
         base_h = 0;
-        base_d = 0;
     }
 
     g_proxy_state.width = base_w;
     g_proxy_state.height = base_h;
-    g_proxy_state.depth = base_d;
     g_proxy_state.internal_format = (GLenum)internalformat;
     g_proxy_state.valid = 1;
 
@@ -976,9 +1003,9 @@ static void glesmod_proxy_record(GLenum target, GLint level, GLint internalforma
         char msg[256];
         g_proxy_logged = 1;
         snprintf(msg, sizeof(msg),
-                 "[GLESMod] proxy texture 仿真: target=0x%04X level=%d %dx%dx%d max=%d -> %dx%dx%d",
-                 (unsigned)target, (int)level, (int)width, (int)height, (int)depth,
-                 (int)max, (int)base_w, (int)base_h, (int)base_d);
+                 "[GLESMod] proxy texture 仿真: target=0x%04X level=%d %dx%d max=%d -> %dx%d",
+                 (unsigned)target, (int)level, (int)width, (int)height,
+                 (int)max, (int)base_w, (int)base_h);
         glesmod_log(msg);
     }
 }
@@ -992,8 +1019,6 @@ static GLint glesmod_proxy_query(GLenum pname, GLint level)
             return glesmod_proxy_level_size(g_proxy_state.width, level);
         case GLESMOD_GL_TEXTURE_HEIGHT:
             return glesmod_proxy_level_size(g_proxy_state.height, level);
-        case GLESMOD_GL_TEXTURE_DEPTH:
-            return glesmod_proxy_level_size(g_proxy_state.depth, level);
         case GLESMOD_GL_TEXTURE_INTERNAL_FORMAT:
             return (GLint)g_proxy_state.internal_format;
         default:
@@ -1072,7 +1097,11 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
     glesmod_lazy_init();
 
     if (glesmod_should_emulate_proxy(target)) {
-        glesmod_proxy_record(target, level, internalformat, width, height, 1);
+        glesmod_proxy_record(target, level, internalformat, width, height);
+        return;
+    }
+    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
+        glesmod_log_proxy_unsupported(target);
         return;
     }
 
@@ -1109,8 +1138,9 @@ void glTexImage3D(GLenum target, GLint level, GLint internalformat,
 
     glesmod_lazy_init();
 
-    if (glesmod_should_emulate_proxy(target)) {
-        glesmod_proxy_record(target, level, internalformat, width, height, depth);
+    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
+        /* 3D / array proxy 暂未实现：不进 ANGLE，按不可分配处理。 */
+        glesmod_log_proxy_unsupported(target);
         return;
     }
 
@@ -1142,6 +1172,13 @@ void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *p
         }
         return;
     }
+    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
+        if (params != NULL) {
+            *params = 0;
+        }
+        glesmod_log_proxy_unsupported(target);
+        return;
+    }
 
     typedef void (*fn_t)(GLenum, GLint, GLenum, GLint *);
     static fn_t real = NULL;
@@ -1157,6 +1194,13 @@ void glGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, GLfloat 
         if (params != NULL) {
             *params = (GLfloat)glesmod_proxy_query(pname, level);
         }
+        return;
+    }
+    if (glesmod_proxy_emu_enabled() && glesmod_is_proxy_target(target)) {
+        if (params != NULL) {
+            *params = 0.0f;
+        }
+        glesmod_log_proxy_unsupported(target);
         return;
     }
 

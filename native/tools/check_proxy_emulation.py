@@ -60,17 +60,24 @@ def check_custom_definitions() -> None:
         if not re.search(rf"^void\s+{re.escape(name)}\s*\(", text, re.M):
             errors.append(f"custom.c: missing definition for {name}")
 
+    if "glesmod_is_emulated_proxy_target" not in text:
+        errors.append("custom.c: glesmod_is_emulated_proxy_target() is missing")
+    if "glesmod_log_proxy_unsupported" not in text:
+        errors.append("custom.c: glesmod_log_proxy_unsupported() is missing")
+
     if "glesmod_should_emulate_proxy(target)" not in text:
         errors.append("custom.c: glesmod_should_emulate_proxy(target) is not used")
     else:
         n = text.count("glesmod_should_emulate_proxy(target)")
         notes.append(f"custom.c: proxy emulation guard used {n}x")
-        if n < 4:
+        if n < 3:
             errors.append(
-                "custom.c: expected proxy guard in glTexImage2D, glTexImage3D, "
+                "custom.c: expected emulated-proxy guard in glTexImage2D, "
                 "glGetTexLevelParameteriv and glGetTexLevelParameterfv"
             )
 
+    if "glesmod_proxy_emu_enabled()" not in text:
+        errors.append("custom.c: glesmod_proxy_emu_enabled() is not used")
     if "glesmod_proxy_record(" not in text:
         errors.append("custom.c: glesmod_proxy_record() is not called")
     if "glesmod_proxy_query(" not in text:
