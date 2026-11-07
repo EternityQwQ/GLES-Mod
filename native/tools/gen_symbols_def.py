@@ -84,6 +84,12 @@ CUSTOM_SYMBOLS = {
     # 需要定制实现来把 internalformat/format 翻译成 ES 合法值。
     "glTexImage2D",
     "glTexImage3D",
+    # 【proxy texture 仿真】
+    #   GLES 没有 GL_PROXY_TEXTURE_*；桌面 GL 用它探测最大纹理尺寸。
+    #   ANGLE 2.1.1 对 proxy target 的 glGetTexLevelParameteriv 会空指针崩溃。
+    #   改为定制实现：proxy target 返回本地记录值，不进入驱动。
+    "glGetTexLevelParameteriv",
+    "glGetTexLevelParameterfv",
     # 【glTexStorage2D/3D：深度格式翻译必须覆盖「不可变存储」这条路】
     #   Iris 建 FBO 报 36055 = INCOMPLETE_MISSING_ATTACHMENT（附件无存储）。
     #   符号表核对显示关键差异：

@@ -132,6 +132,14 @@ def main():
                    os.path.join(HERE, "verify_doc_claims.py")])
     gates.append(("doc facts", rc, line_of(out, ["verdict"])))
 
+    # 12. Proxy texture emulation wiring. This is the guard that keeps the
+    #     ANGLE startup fix from being silently undone by a symbols.def /
+    #     forwarder regeneration. It is static on purpose: the failure mode is
+    #     a native SIGSEGV, which a host-only test cannot catch.
+    rc, out = run([PY, "-X", "utf8",
+                   os.path.join(HERE, "check_proxy_emulation.py")])
+    gates.append(("proxy emu", rc, line_of(out, ["verdict"])))
+
     print("=" * 74)
     for name, rc, v in gates:
         print("%-16s rc=%-3s %s" % (name, rc, v[:150]))

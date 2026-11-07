@@ -34,7 +34,7 @@
  * LGPL-3.0-or-later
  */
 
-/* ===== 直接转发（339 个）===== */
+/* ===== 直接转发（337 个）===== */
 
 F void glActiveShaderProgram(GLuint p0, GLuint p1)
 F void glActiveTexture(GLenum p0)
@@ -195,8 +195,6 @@ F void glGetSamplerParameteriv(GLuint p0, GLenum p1, GLint * p2)
 F void glGetShaderPrecisionFormat(GLenum p0, GLenum p1, GLint * p2, GLint * p3)
 F void glGetShaderSource(GLuint p0, GLsizei p1, GLsizei * p2, GLchar * p3)
 F void glGetSynciv(GLsync p0, GLenum p1, GLsizei p2, GLsizei * p3, GLint * p4)
-F void glGetTexLevelParameterfv(GLenum p0, GLint p1, GLenum p2, GLfloat * p3)
-F void glGetTexLevelParameteriv(GLenum p0, GLint p1, GLenum p2, GLint * p3)
 F void glGetTexParameterIiv(GLenum p0, GLenum p1, GLint * p2)
 F void glGetTexParameterIuiv(GLenum p0, GLenum p1, GLuint * p2)
 F void glGetTexParameterfv(GLenum p0, GLenum p1, GLfloat * p2)
@@ -376,7 +374,7 @@ F void glVertexBindingDivisor(GLuint p0, GLuint p1)
 F void glViewport(GLint p0, GLint p1, GLsizei p2, GLsizei p3)
 F void glWaitSync(GLsync p0, GLbitfield p1, GLuint64 p2)
 
-/* ===== 定制实现（26 个，定义在 src/custom.c）===== */
+/* ===== 定制实现（28 个，定义在 src/custom.c）===== */
 
 C void glBufferStorage(GLenum p0, GLsizeiptr p1, const void * p2, GLbitfield p3)
 C GLenum glCheckFramebufferStatus(GLenum p0)
@@ -390,6 +388,8 @@ C void glGetShaderiv(GLuint p0, GLenum p1, GLint * p2)
 C const GLubyte * glGetString(GLenum p0)
 C const GLubyte * glGetStringi(GLenum p0, GLuint p1)
 C void glGetTexImage(GLenum p0, GLint p1, GLenum p2, GLenum p3, void * p4)
+C void glGetTexLevelParameterfv(GLenum p0, GLint p1, GLenum p2, GLfloat * p3)
+C void glGetTexLevelParameteriv(GLenum p0, GLint p1, GLenum p2, GLint * p3)
 C void glLogicOp(GLenum p0)
 C void * glMapBuffer(GLenum p0, GLenum p1)
 C void * glMapBufferRange(GLenum p0, GLintptr p1, GLsizeiptr p2, GLbitfield p3)

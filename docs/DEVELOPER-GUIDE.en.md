@@ -64,8 +64,8 @@ understand about this codebase:
                  ┌───────────────────▼──────────────────────────┐
                  │ libgl_gles.so   (native core, ONE copy)      │
                  │                                              │
-                 │  generated_forwarders.c  339 symbols ───────────┼──► real GLES
-                 │  custom.c                 26 symbols ──────────┤    driver
+                 │  generated_forwarders.c  337 symbols ───────────┼──► real GLES
+                 │  custom.c                 28 symbols ──────────┤    driver
                  │  enum.c      enum/format translation          │
                  │  shader.c    GLSL → GLSL ES converter ────────┤
                  │  core.c      caps probe, degrade, status      │
@@ -147,8 +147,8 @@ Two environment variables are non-negotiable, both learned from crashes:
 
 | Kind | Count | Source | Behaviour |
 |---|---|---|---|
-| `F` forwarded | 339 | `generated_forwarders.c` (generated) | Resolve the real GLES symbol once, cache it, tail-call it |
-| `C` custom | 26 | `custom.c` | Hand-written, because behaviour must differ |
+| `F` forwarded | 337 | `generated_forwarders.c` (generated) | Resolve the real GLES symbol once, cache it, tail-call it |
+| `C` custom | 28 | `custom.c` | Hand-written, because behaviour must differ |
 | `S` safe stub | 484 | `generated_forwarders.c` (generated) | No-op that returns a neutral value and records a degradation event |
 
 `native/symbols.def` is the **single source of truth** for which symbol is in
@@ -166,7 +166,7 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  real count + 1
 The one extra extension is `GL_ARB_draw_buffers_blend`, reported because some
 code paths test for it before using multi-target blending.
 
-### 4.2 Custom implementations (26)
+### 4.2 Custom implementations (28)
 
 These exist where a pure forward is wrong. Two examples that show the pattern:
 
@@ -178,6 +178,13 @@ while remaining truthful about the underlying ES version.
 **`glShaderSource`** is where the entire converter is wired in. It also
 **always records every shader's source** so that a later compile failure can be
 diagnosed — see §10.
+
+**`glTexImage2D/3D` + `glGetTexLevelParameteriv/fv`** implement proxy-texture
+emulation. Desktop GL's `GL_PROXY_TEXTURE_*` does not exist in GLES, but
+Minecraft uses it to probe the maximum texture size. These entry points read and
+write the local `g_proxy_state` for proxy targets and **never enter the driver**,
+avoiding the ANGLE 2.1.1 null dereference on `InvalidEnum`. See
+`docs/proxy-texture-fix-plan.md`.
 
 ### 4.3 The `RESOLVE_OR_RETURN` pattern
 
@@ -450,6 +457,7 @@ outside the game.
 | `GLESMOD_LOG_FILE` | path | Override `native.log` location |
 | `GLESMOD_SHADER_PROBE` | 0/1 | Dump shader source on compile failure |
 | `GLESMOD_GEOM_PROBE` | 0/1 | Geometry diagnostic probe |
+| `GLESMOD_PROXY_EMU` | 0/1 | Default 1: proxy-texture emulation; 0 disables it (debug only) |
 | `GLESMOD_ABI` | int | Expected ABI version |
 | `POJAVEXEC_EGL` | lib name | Set by the launcher; the EGL instance we must take `eglGetProcAddress` from |
 

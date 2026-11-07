@@ -417,6 +417,18 @@ GLESMOD_EXPORT void   glTexImage3D(GLenum target, GLint level, GLint internalfor
                                    GLsizei width, GLsizei height, GLsizei depth,
                                    GLint border, GLenum format, GLenum type,
                                    const void *pixels);
+
+/*
+ * glGetTexLevelParameteriv / fv —— proxy texture 仿真。
+ *
+ * GLES 没有 GL_PROXY_TEXTURE_*；桌面 GL 用它探测最大纹理尺寸。
+ * ANGLE 2.1.1 对 proxy target 会空指针崩溃，因此这两个入口在 proxy
+ * target 上直接返回本地记录值，不进入驱动。
+ */
+GLESMOD_EXPORT void   glGetTexLevelParameteriv(GLenum target, GLint level,
+                                               GLenum pname, GLint *params);
+GLESMOD_EXPORT void   glGetTexLevelParameterfv(GLenum target, GLint level,
+                                               GLenum pname, GLfloat *params);
 /*
  * glTexStorage2D / glTexStorage3D —— 不可变存储路径上的深度格式翻译。
  *

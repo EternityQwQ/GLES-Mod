@@ -820,6 +820,187 @@ static const char *tex_internalformat_name(GLint f)
     }
 }
 
+/* ================================================================== */
+/* Proxy texture 仿真                                                  */
+/* ================================================================== */
+
+/*
+ * 桌面 GL 的 GL_PROXY_TEXTURE_* 不是真正的纹理分配：
+ *   glTexImage2D(proxy, ...) 只记录“这个尺寸能不能分配”
+ *   glGetTexLevelParameter*  再把记录值读回来
+ *
+ * GLES 没有 proxy target。厂商 GLES 驱动通常返回 0 / INVALID_ENUM；
+ * ANGLE 2.1.1 的 glGetTexLevelParameteriv 对 InvalidEnum 会空指针崩溃。
+ *
+ * 因此我们在这里完整仿真 proxy 语义，proxy target 不进入驱动。
+ * 参考 MobileGlues 的 gl/texture.cpp 实现（按语义自行实现，不逐字复制）。
+ */
+
+#define GLESMOD_GL_PROXY_TEXTURE_1D                      0x8063
+#define GLESMOD_GL_PROXY_TEXTURE_2D                      0x8064
+#define GLESMOD_GL_PROXY_TEXTURE_3D                      0x8070
+#define GLESMOD_GL_PROXY_TEXTURE_RECTANGLE               0x84F7
+#define GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP                0x851B
+#define GLESMOD_GL_PROXY_TEXTURE_1D_ARRAY                0x8C19
+#define GLESMOD_GL_PROXY_TEXTURE_2D_ARRAY                0x8C1B
+#define GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP_ARRAY          0x900B
+#define GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE          0x9101
+#define GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE_ARRAY    0x9103
+
+#define GLESMOD_GL_TEXTURE_WIDTH                         0x1000
+#define GLESMOD_GL_TEXTURE_HEIGHT                        0x1001
+#define GLESMOD_GL_TEXTURE_INTERNAL_FORMAT               0x1003
+#define GLESMOD_GL_TEXTURE_DEPTH                         0x8071
+#define GLESMOD_GL_MAX_TEXTURE_SIZE                      0x0D33
+
+typedef struct {
+    GLsizei width;          /* base level（level 0）宽度 */
+    GLsizei height;
+    GLsizei depth;
+    GLenum  internal_format;
+    int     valid;
+} glesmod_proxy_state_t;
+
+/* 每个线程一份；MC 的探测在 Render thread 上，单线程足够。 */
+static __thread glesmod_proxy_state_t g_proxy_state;
+static __thread int g_proxy_logged = 0;
+
+static int glesmod_is_proxy_target(GLenum target)
+{
+    switch (target) {
+        case GLESMOD_GL_PROXY_TEXTURE_1D:
+        case GLESMOD_GL_PROXY_TEXTURE_2D:
+        case GLESMOD_GL_PROXY_TEXTURE_3D:
+        case GLESMOD_GL_PROXY_TEXTURE_RECTANGLE:
+        case GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP:
+        case GLESMOD_GL_PROXY_TEXTURE_1D_ARRAY:
+        case GLESMOD_GL_PROXY_TEXTURE_2D_ARRAY:
+        case GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP_ARRAY:
+        case GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE:
+        case GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE_ARRAY:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
+/* 0 = 关闭仿真（退回旧行为），1 = 启用；默认启用。 */
+static int glesmod_proxy_emu_enabled(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        const char *v = glesmod_env_str(GLESMOD_ENV_PROXY_EMU);
+        cached = (v != NULL && v[0] != '\0' && strcmp(v, "0") == 0) ? 0 : 1;
+    }
+    return cached;
+}
+
+static int glesmod_should_emulate_proxy(GLenum target)
+{
+    return glesmod_is_proxy_target(target) && glesmod_proxy_emu_enabled();
+}
+
+static GLint glesmod_proxy_max_texture_size(void)
+{
+    static GLint cached = 0;
+    if (cached <= 0) {
+        typedef void (*get_int_t)(GLenum, GLint *);
+        get_int_t get_int = (get_int_t)glesym_resolve("glGetIntegerv");
+        GLint v = 0;
+        if (get_int != NULL) {
+            get_int(GLESMOD_GL_MAX_TEXTURE_SIZE, &v);
+        }
+        /* 查询失败时保守取 4096，让 MC 自然回落到自己的 GL_MAX_TEXTURE_SIZE。 */
+        cached = (v > 0) ? v : 4096;
+    }
+    return cached;
+}
+
+static GLsizei glesmod_proxy_base_size(GLsizei size, GLint level)
+{
+    if (size <= 0) return 0;
+    if (level <= 0) return size;
+    if (level >= 31) return 0;
+    if (size > (GLsizei)(0x7fffffff >> level)) return 0;
+    return (GLsizei)(size << level);
+}
+
+static GLint glesmod_proxy_level_size(GLint base, GLint level)
+{
+    if (base <= 0) return 0;
+    if (level <= 0) return base;
+    if (level >= 31) return 1;
+    {
+        GLint v = base >> level;
+        return (v > 0) ? v : 1;
+    }
+}
+
+static void glesmod_proxy_record(GLenum target, GLint level, GLint internalformat,
+                                 GLsizei width, GLsizei height, GLsizei depth)
+{
+    GLint max = glesmod_proxy_max_texture_size();
+
+    GLsizei base_w = glesmod_proxy_base_size(width, level);
+    GLsizei base_h = glesmod_proxy_base_size(height, level);
+    /*
+     * 2D/rectangle/cube/1D 的 depth 恒为 1，不随 level 左移；
+     * 只有 3D / array 的 depth 才是真正的层数。
+     */
+    int depth_is_volume =
+        (target == GLESMOD_GL_PROXY_TEXTURE_3D ||
+         target == GLESMOD_GL_PROXY_TEXTURE_2D_ARRAY ||
+         target == GLESMOD_GL_PROXY_TEXTURE_CUBE_MAP_ARRAY ||
+         target == GLESMOD_GL_PROXY_TEXTURE_2D_MULTISAMPLE_ARRAY);
+    GLsizei base_d = depth_is_volume
+                         ? glesmod_proxy_base_size(depth, level)
+                         : 1;
+
+    /*
+     * 桌面 proxy 语义：该 level 的任一维度超过 GL_MAX_TEXTURE_SIZE，
+     * 就视为“不可分配”，proxy 的尺寸读回 0。
+     */
+    if ((GLint)width > max || (GLint)height > max || (GLint)depth > max) {
+        base_w = 0;
+        base_h = 0;
+        base_d = 0;
+    }
+
+    g_proxy_state.width = base_w;
+    g_proxy_state.height = base_h;
+    g_proxy_state.depth = base_d;
+    g_proxy_state.internal_format = (GLenum)internalformat;
+    g_proxy_state.valid = 1;
+
+    if (!g_proxy_logged) {
+        char msg[256];
+        g_proxy_logged = 1;
+        snprintf(msg, sizeof(msg),
+                 "[GLESMod] proxy texture 仿真: target=0x%04X level=%d %dx%dx%d max=%d -> %dx%dx%d",
+                 (unsigned)target, (int)level, (int)width, (int)height, (int)depth,
+                 (int)max, (int)base_w, (int)base_h, (int)base_d);
+        glesmod_log(msg);
+    }
+}
+
+static GLint glesmod_proxy_query(GLenum pname, GLint level)
+{
+    if (!g_proxy_state.valid) return 0;
+
+    switch (pname) {
+        case GLESMOD_GL_TEXTURE_WIDTH:
+            return glesmod_proxy_level_size(g_proxy_state.width, level);
+        case GLESMOD_GL_TEXTURE_HEIGHT:
+            return glesmod_proxy_level_size(g_proxy_state.height, level);
+        case GLESMOD_GL_TEXTURE_DEPTH:
+            return glesmod_proxy_level_size(g_proxy_state.depth, level);
+        case GLESMOD_GL_TEXTURE_INTERNAL_FORMAT:
+            return (GLint)g_proxy_state.internal_format;
+        default:
+            return 0;
+    }
+}
+
 /*
  * 归因并记录一次失败的纹理分配。
  * 调用方必须已「先抽干、再调用、再取错误」。
@@ -856,9 +1037,7 @@ static void texprobe_report(const char *who, GLenum err, GLenum target,
      *   2. 每次进入世界都重试，会把 status.json 的降级事件表刷爆。
      * 因此只记录、不升级为降级事件。
      */
-    if (target == 0x8064 /* GL_PROXY_TEXTURE_2D */ ||
-        target == 0x8071 /* GL_PROXY_TEXTURE_3D */ ||
-        target == 0x8072 /* GL_PROXY_TEXTURE_CUBE_MAP */) {
+    if (glesmod_is_proxy_target(target)) {
         return;
     }
 
@@ -891,6 +1070,11 @@ void glTexImage2D(GLenum target, GLint level, GLint internalformat,
     static fn_t real = NULL;
 
     glesmod_lazy_init();
+
+    if (glesmod_should_emulate_proxy(target)) {
+        glesmod_proxy_record(target, level, internalformat, width, height, 1);
+        return;
+    }
 
     GLenum f = format, t = type;
     fixup_depth_format("glTexImage2D", &internalformat, &f, &t);
@@ -925,6 +1109,11 @@ void glTexImage3D(GLenum target, GLint level, GLint internalformat,
 
     glesmod_lazy_init();
 
+    if (glesmod_should_emulate_proxy(target)) {
+        glesmod_proxy_record(target, level, internalformat, width, height, depth);
+        return;
+    }
+
     GLenum f = format, t = type;
     fixup_depth_format("glTexImage3D", &internalformat, &f, &t);
 
@@ -939,6 +1128,44 @@ void glTexImage3D(GLenum target, GLint level, GLint internalformat,
         texprobe_report("glTexImage3D", get_err(), target, internalformat,
                         width, height, f, t, pixels);
     }
+}
+
+/* ================================================================== */
+/* glGetTexLevelParameteriv / fv —— proxy texture 查询                 */
+/* ================================================================== */
+
+void glGetTexLevelParameteriv(GLenum target, GLint level, GLenum pname, GLint *params)
+{
+    if (glesmod_should_emulate_proxy(target)) {
+        if (params != NULL) {
+            *params = glesmod_proxy_query(pname, level);
+        }
+        return;
+    }
+
+    typedef void (*fn_t)(GLenum, GLint, GLenum, GLint *);
+    static fn_t real = NULL;
+
+    glesmod_lazy_init();
+    RESOLVE_OR_RETURN(real, "glGetTexLevelParameteriv", );
+    real(target, level, pname, params);
+}
+
+void glGetTexLevelParameterfv(GLenum target, GLint level, GLenum pname, GLfloat *params)
+{
+    if (glesmod_should_emulate_proxy(target)) {
+        if (params != NULL) {
+            *params = (GLfloat)glesmod_proxy_query(pname, level);
+        }
+        return;
+    }
+
+    typedef void (*fn_t)(GLenum, GLint, GLenum, GLfloat *);
+    static fn_t real = NULL;
+
+    glesmod_lazy_init();
+    RESOLVE_OR_RETURN(real, "glGetTexLevelParameterfv", );
+    real(target, level, pname, params);
 }
 
 /* ================================================================== */

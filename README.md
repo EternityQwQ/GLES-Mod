@@ -49,7 +49,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **Native ES 3.2 backend** | 849 exported GL symbols — 339 forwarded, 26 custom implementations, 484 safe stubs. No per-call JNI. |
+| **Native ES 3.2 backend** | 849 exported GL symbols — 337 forwarded, 28 custom implementations, 484 safe stubs. No per-call JNI. |
 | **GLSL → GLSL ES converter** | Desktop GLSL is not GLSL ES. The biggest difference: **desktop GLSL silently converts `int` → `float`, GLSL ES refuses to**. This converter rewrites the source at load time so shaders that work on desktop keep working on ES. It is the single most important component in this project. |
 | **Capability probing & graceful degradation** | Probes what the device actually supports, reports it, and degrades rather than crashing. Missing a feature is a decision, not an accident. |
 | **Sodium / Embeddium aware** | Detects the optimisation mod and its version, and picks a known-good strategy. Unknown versions take a *conservative* path and say so. Never guesses at internals, never mixin-injects into them. |
@@ -229,7 +229,7 @@ flowchart LR
 
 | | |
 |---|---|
-| **原生 ES 3.2 后端** | 导出 849 个 GL 符号 —— 339 个转发、26 个定制实现、484 个安全桩。热点路径不经过 JNI。 |
+| **原生 ES 3.2 后端** | 导出 849 个 GL 符号 —— 337 个转发、28 个定制实现、484 个安全桩。热点路径不经过 JNI。 |
 | **GLSL → GLSL ES 转换器** | 桌面 GLSL 不是 GLSL ES。最大的差异是：**桌面 GLSL 允许 `int` → `float` 隐式转换，GLSL ES 不允许**。本转换器在着色器加载时改写源码，让桌面能跑的着色器在 ES 上也能跑。这是本项目最关键的部件。 |
 | **能力探测与优雅降级** | 探测设备真实能力并如实上报；能力不足时降级而不是崩溃。缺功能是一个**经过判断的决定**，不是意外。 |
 | **感知 Sodium / Embeddium** | 识别优化模组及其版本，选择已验证的策略。未知版本走**保守**路径并在日志中说明。绝不猜测其内部实现，也不对其做 Mixin 注入。 |

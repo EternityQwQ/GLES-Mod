@@ -58,8 +58,8 @@ FCL 之类的启动器按路径加载 GL 实现并交给 LWJGL。通常那个路
                  ┌───────────────────▼──────────────────────────┐
                  │ libgl_gles.so    （native 核心，只有一份）    │
                  │                                              │
-                 │  generated_forwarders.c  339 符号 ───────────┼──► 真实 GLES
-                 │  custom.c                 26 符号 ────────────┤    驱动
+                 │  generated_forwarders.c  337 符号 ───────────┼──► 真实 GLES
+                 │  custom.c                 28 符号 ────────────┤    驱动
                  │  enum.c      枚举/格式转换                    │
                  │  shader.c    GLSL → GLSL ES 转换器 ───────────┤
                  │  core.c      能力探测 / 降级 / 状态输出        │
@@ -136,8 +136,8 @@ FCL 通过扫描已安装包的 `meta-data` 来发现渲染器插件（FCL 的
 
 | 类别 | 数量 | 来源 | 行为 |
 |---|---|---|---|
-| `F` 转发 | 339 | `generated_forwarders.c`（生成） | 首次调用解析真实 GLES 符号并缓存，之后直接跳转 |
-| `C` 定制 | 26 | `custom.c` | 手写，因为行为必须不同 |
+| `F` 转发 | 337 | `generated_forwarders.c`（生成） | 首次调用解析真实 GLES 符号并缓存，之后直接跳转 |
+| `C` 定制 | 28 | `custom.c` | 手写，因为行为必须不同 |
 | `S` 安全桩 | 484 | `generated_forwarders.c`（生成） | 空实现，返回中性值并记录一次降级事件 |
 
 `native/symbols.def` 是「哪个符号属于哪一类」的**唯一真源**。
@@ -154,7 +154,7 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  真实数量 + 1
 那多出来的一个扩展是 `GL_ARB_draw_buffers_blend`，因为有些代码路径会先检测
 它再决定是否使用多目标混合。
 
-### 4.2 26 个定制实现
+### 4.2 28 个定制实现
 
 它们存在的场合是「单纯转发会得到错误结果」。两个能说明模式的例子：
 
@@ -165,6 +165,12 @@ glGetIntegerv(GL_NUM_EXTENSIONS)  ->  真实数量 + 1
 
 **`glShaderSource`** 是整个转换器的接入点。它还会**无条件记录每一个着色器的
 源码**，以便后续编译失败时可诊断 —— 见 §10。
+
+**`glTexImage2D/3D` + `glGetTexLevelParameteriv/fv`** 负责 proxy texture 仿真。
+桌面 GL 的 `GL_PROXY_TEXTURE_*` 在 GLES 中不存在，而 Minecraft 用它探测最大
+纹理尺寸。这两个入口在 proxy target 上直接读写本地 `g_proxy_state`，**不进入
+驱动**，从而避免 ANGLE 2.1.1 对 `InvalidEnum` 的空指针崩溃。详见
+`docs/proxy-texture-fix-plan.md`。
 
 ### 4.3 `RESOLVE_OR_RETURN` 模式
 
@@ -408,6 +414,7 @@ FCL 插件环境变量  >  NeoForge 配置文件  >  自动探测  >  内置默�
 | `GLESMOD_LOG_FILE` | 路径 | 覆盖 `native.log` 位置 |
 | `GLESMOD_SHADER_PROBE` | 0/1 | 编译失败时转储着色器源码 |
 | `GLESMOD_GEOM_PROBE` | 0/1 | 几何诊断探针 |
+| `GLESMOD_PROXY_EMU` | 0/1 | 默认 1：proxy texture 仿真；0 退回旧行为（调试用） |
 | `GLESMOD_ABI` | 整数 | 期望的 ABI 版本 |
 | `POJAVEXEC_EGL` | 库名 | 由启动器设置；我们必须从**同一个实例**取 `eglGetProcAddress` |
 
