@@ -13,30 +13,30 @@
       ToggleableEnv 会额外注入 POJAVEXEC_EGL=libEGL_angle.so，覆盖默认值。
     -->
     <string name="renderer_config" translatable="false">{
-  &quot;displayName&quot;: &quot;GLES Mod&quot;,
-  &quot;rendererId&quot;: &quot;glesmod&quot;,
-  &quot;rendererGLPath&quot;: &quot;**|libgl_gles.so&quot;,
-  &quot;rendererEGLPath&quot;: &quot;libEGL.so&quot;,
-  &quot;env&quot;: [
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;POJAV_RENDERER&quot;, &quot;value&quot;: &quot;opengles3&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;LIBGL_ES&quot;, &quot;value&quot;: &quot;3&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_ABI&quot;, &quot;value&quot;: &quot;1&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_ENABLE&quot;, &quot;value&quot;: &quot;1&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_DEGRADE_LEVEL&quot;, &quot;value&quot;: &quot;1&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_LOG_LEVEL&quot;, &quot;value&quot;: &quot;1&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_TRACE&quot;, &quot;value&quot;: &quot;1&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_SHADER_PROBE&quot;, &quot;value&quot;: &quot;0&quot; },
-    { &quot;type&quot;: &quot;NormalEnv&quot;, &quot;key&quot;: &quot;GLESMOD_GEOM_PROBE&quot;, &quot;value&quot;: &quot;0&quot; },
+  \"displayName\": \"GLES Mod\",
+  \"rendererId\": \"glesmod\",
+  \"rendererGLPath\": \"**|libgl_gles.so\",
+  \"rendererEGLPath\": \"libEGL.so\",
+  \"env\": [
+    { \"type\": \"NormalEnv\", \"key\": \"POJAV_RENDERER\", \"value\": \"opengles3\" },
+    { \"type\": \"NormalEnv\", \"key\": \"LIBGL_ES\", \"value\": \"3\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_ABI\", \"value\": \"1\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_ENABLE\", \"value\": \"1\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_DEGRADE_LEVEL\", \"value\": \"1\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_LOG_LEVEL\", \"value\": \"1\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_TRACE\", \"value\": \"1\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_SHADER_PROBE\", \"value\": \"0\" },
+    { \"type\": \"NormalEnv\", \"key\": \"GLESMOD_GEOM_PROBE\", \"value\": \"0\" },
     {
-      &quot;type&quot;: &quot;ToggleableEnv&quot;,
-      &quot;key&quot;: &quot;POJAVEXEC_EGL&quot;,
-      &quot;value&quot;: &quot;libEGL_angle.so&quot;,
-      &quot;toggle&quot;: false,
-      &quot;title&quot;: { &quot;key&quot;: &quot;gles_driver_angle&quot; }
+      \"type\": \"ToggleableEnv\",
+      \"key\": \"POJAVEXEC_EGL\",
+      \"value\": \"libEGL_angle.so\",
+      \"toggle\": false,
+      \"title\": { \"key\": \"gles_driver_angle\" }
     }
   ],
-  &quot;minMCVer&quot;: &quot;1.21.1&quot;,
-  &quot;maxMCVer&quot;: &quot;1.21.1&quot;
+  \"minMCVer\": \"1.21.1\",
+  \"maxMCVer\": \"1.21.1\"
 }</string>
 
     <string name="gles_driver_angle">使用 ANGLE 作为 GLES 驱动（实验性）</string>

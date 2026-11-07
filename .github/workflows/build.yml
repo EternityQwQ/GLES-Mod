@@ -115,6 +115,10 @@ jobs:
         shell: pwsh
         run: .\fcl-plugin\build-plugin.ps1 -SkipNative
 
+      - name: Verify compiled APK v2 config and native markers
+        shell: pwsh
+        run: python native\tools\check_plugin_apk.py --apk build\plugin\glesmod-renderer-plugin.apk
+
       - name: Show APK artifacts
         shell: pwsh
         run: |

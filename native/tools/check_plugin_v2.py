@@ -43,6 +43,37 @@ def read(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def android_unescape(text: str) -> str:
+    """Approximate aapt2's string unescaping for the JSON resource.
+
+    aapt2 does NOT treat &quot; as a literal quote: it decodes the entity to
+    a quote, then the resource string parser strips unescaped quotes. The
+    source must therefore use backslash-escaped quotes (\\"). This helper
+    turns those back into real quotes for json.loads().
+    """
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\\" and i + 1 < len(text):
+            nxt = text[i + 1]
+            if nxt == "u" and i + 5 < len(text):
+                try:
+                    out.append(chr(int(text[i + 2:i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            mapping = {'"': '"', "'": "'", "\\": "\\", "n": "\n", "t": "\t", "r": "\r"}
+            if nxt in mapping:
+                out.append(mapping[nxt])
+                i += 2
+                continue
+        out.append(ch)
+        i += 1
+    return "".join(out)
+
+
 def main() -> int:
     manifest = read(MANIFEST)
     strings_xml = read(STRINGS)
@@ -89,7 +120,7 @@ def main() -> int:
 
     if config_text is not None:
         try:
-            cfg = json.loads(config_text)
+            cfg = json.loads(android_unescape(config_text))
         except json.JSONDecodeError as e:
             fail(f"renderer_config: JSON parse failed: {e}")
             return report()
