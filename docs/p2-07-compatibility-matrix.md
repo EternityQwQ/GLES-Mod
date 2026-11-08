@@ -15,6 +15,7 @@
 > | v3 | 2026-09-29 | **新增 Embeddium 实机结果**：无视觉问题、帧率与 Sodium 相当；§4.1 查明该风险路径**实测未被触发** |
 > | v4 | 2026-11-07 | 新增 **ANGLE 可选后端**验证：Adreno 619 / Mali-G57，原生与 ANGLE 双路径通过；补充 proxy texture 修复记录 |
 > | v5 | 2026-11-07 | 新增 Mali `#error "..."` 词法错误修复记录（Sodium + Iris 进世界崩溃的根因） |
+> | v6 | 2026-11-08 | 新增 ANGLE Multi-Draw 检测验证：`GL_EXT_multi_draw_indirect=1`，`multiDraw=true` |
 
 ---
 
@@ -231,6 +232,42 @@ MobileGlues（GL→ES 转发）与 Zink（GL→Vulkan）都在 **native 层**，
   `RenderSystem.maxSupportedTextureSize` 崩溃不再出现；
 - 本轮 MC/Sodium 只使用 `GL_PROXY_TEXTURE_2D`，没有触发「未实现 proxy target」
   日志，符合收窄后的预期。
+
+### 3.6 ANGLE Multi-Draw 检测（2026-11-08）
+
+同一构建 `v10 / b88b129` 分别跑 ANGLE 与原生模式，启动日志对比：
+
+| 项 | ANGLE | 原生 |
+|---|---|---|
+| `POJAVEXEC_EGL` | `libEGL_angle.so` | `libEGL.so` |
+| `GL_EXT_multi_draw_indirect` | **1** | 0 |
+| `arrays` | **1** | 0 |
+| `elements` | **1** | 0 |
+| `multiDraw` | **true** | false |
+| Multi-Draw 降级提示 | 无 | 有 |
+
+ANGLE 日志原文：
+
+```text
+[GLESMod] Multi-Draw: GL_EXT_multi_draw_indirect=1, arrays=1, elements=1
+multiDraw=true
+ES 能力满足优化模组的全部功能需求，无降级。
+```
+
+原生日志：
+
+```text
+[GLESMod] Multi-Draw: GL_EXT_multi_draw_indirect=0, arrays=0, elements=0
+multiDraw=false
+Multi-Draw（Sodium 区块渲染会降级为逐次绘制，性能略降）
+```
+
+结论：
+
+- ANGLE 2.1.1 暴露 `GL_EXT_multi_draw_indirect`，两个 indirect 入口均可解析；
+- GLES-Mod 在 ANGLE 模式下启用原生 indirect 路径，不再记录 Multi-Draw 降级；
+- Adreno 原生 GLES 驱动未暴露该扩展，保持逐条回退；
+- 两种模式均正常进世界、退出，无崩溃。
 
 ---
 
